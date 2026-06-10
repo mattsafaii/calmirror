@@ -1,0 +1,15 @@
+# Local Solo/Basecamp session config
+.basecamp/
+
+# Build artifacts
+/calmirror
+/dist/
+*.out
+
+# Local state / secrets (never commit)
+*.db
+*.sqlite
+*.sqlite3
+
+# macOS
+.DS_Store
