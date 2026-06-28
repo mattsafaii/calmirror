@@ -9,11 +9,9 @@ import (
 	"os/signal"
 	"path/filepath"
 
-	"github.com/mattsafaii/calmirror/internal/caldav"
 	"github.com/mattsafaii/calmirror/internal/config"
 	"github.com/mattsafaii/calmirror/internal/engine"
 	"github.com/mattsafaii/calmirror/internal/feed"
-	"github.com/mattsafaii/calmirror/internal/keychain"
 	"github.com/mattsafaii/calmirror/internal/notify"
 	"github.com/mattsafaii/calmirror/internal/store"
 )
@@ -31,19 +29,6 @@ func cmdSync(args []string) int {
 		return 0
 	}
 
-	password, err := keychain.Get(cfg.ICloud.Username)
-	if errors.Is(err, keychain.ErrNotFound) {
-		return fail("no Keychain password for %q; run `calmirror setup`", cfg.ICloud.Username)
-	}
-	if err != nil {
-		return fail("%v", err)
-	}
-
-	client, err := caldav.New(cfg.ICloud.Username, password)
-	if err != nil {
-		return fail("%v", err)
-	}
-
 	st, err := openStore()
 	if err != nil {
 		return fail("%v", err)
@@ -54,10 +39,10 @@ func cmdSync(args []string) int {
 	defer stop()
 
 	syncer := &engine.Syncer{
-		Store:    st,
-		CalDAV:   client,
-		Fetcher:  &feed.Fetcher{},
-		Notifier: notify.Osascript{},
+		Store:       st,
+		Destination: destinationFactory(cfg),
+		Fetcher:     &feed.Fetcher{},
+		Notifier:    notify.Osascript{},
 	}
 	results, err := syncer.Sync(ctx, cfg.Feeds)
 	if err != nil {

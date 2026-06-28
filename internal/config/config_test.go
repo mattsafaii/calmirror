@@ -62,3 +62,36 @@ func TestValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateKinds(t *testing.T) {
+	bad := map[string]*Config{
+		"unknown kind": {ICloud: ICloud{Username: "u"}, Feeds: []Feed{
+			{Name: "f", Kind: "outlook", SourceURL: "u", DestinationCalendar: "d"}}},
+		"google feed without account": {Feeds: []Feed{
+			{Name: "f", Kind: KindGoogle, SourceURL: "u", DestinationCalendar: "d"}}},
+		"google feed without client id": {Google: Google{Account: "a@gmail.com"}, Feeds: []Feed{
+			{Name: "f", Kind: KindGoogle, SourceURL: "u", DestinationCalendar: "d"}}},
+	}
+	for name, c := range bad {
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s: expected validation error, got nil", name)
+		}
+	}
+
+	// A Google-only config needs no iCloud account; an iCloud-only config needs
+	// no Google block. Both should validate.
+	ok := map[string]*Config{
+		"google only": {Google: Google{Account: "a@gmail.com", ClientID: "cid"}, Feeds: []Feed{
+			{Name: "g", Kind: KindGoogle, SourceURL: "u", DestinationCalendar: "d"}}},
+		"icloud only": {ICloud: ICloud{Username: "u"}, Feeds: []Feed{
+			{Name: "i", Kind: KindICloud, SourceURL: "u", DestinationCalendar: "d"}}},
+		"mixed": {ICloud: ICloud{Username: "u"}, Google: Google{Account: "a@gmail.com", ClientID: "cid"}, Feeds: []Feed{
+			{Name: "i", Kind: KindICloud, SourceURL: "u", DestinationCalendar: "d"},
+			{Name: "g", Kind: KindGoogle, SourceURL: "u", DestinationCalendar: "d"}}},
+	}
+	for name, c := range ok {
+		if err := c.Validate(); err != nil {
+			t.Errorf("%s: expected valid, got %v", name, err)
+		}
+	}
+}

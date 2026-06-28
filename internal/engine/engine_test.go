@@ -7,54 +7,51 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mattsafaii/calmirror/internal/caldav"
+	ics "github.com/arran4/golang-ical"
 	"github.com/mattsafaii/calmirror/internal/config"
 	"github.com/mattsafaii/calmirror/internal/feed"
 	"github.com/mattsafaii/calmirror/internal/store"
 )
 
-// fakeCalDAV is an in-memory CalDAV stand-in.
-type fakeCalDAV struct {
-	objects        map[string]string // path -> ics body
-	creates        int
-	updates        int
-	deletes        int
-	discoverErr    error
-	createErrPaths map[string]error
+// fakeDest is an in-memory Destination stand-in. Events are keyed by the ref it
+// hands back (the source UID, which is sufficient and stable for tests).
+type fakeDest struct {
+	objects       map[string]string // ref -> event summary
+	creates       int
+	updates       int
+	deletes       int
+	ensureErr     error
+	createErrUIDs map[string]error
 }
 
-func newFakeCalDAV() *fakeCalDAV {
-	return &fakeCalDAV{objects: map[string]string{}, createErrPaths: map[string]error{}}
+func newFakeDest() *fakeDest {
+	return &fakeDest{objects: map[string]string{}, createErrUIDs: map[string]error{}}
 }
 
-func (f *fakeCalDAV) Discover(ctx context.Context) (caldav.Discovery, error) {
-	if f.discoverErr != nil {
-		return caldav.Discovery{}, f.discoverErr
+func (f *fakeDest) EnsureCalendar(ctx context.Context, displayName string) (string, error) {
+	if f.ensureErr != nil {
+		return "", f.ensureErr
 	}
-	return caldav.Discovery{Principal: "/p/", CalendarHome: "/p/calendars/"}, nil
+	return "cal/" + displayName + "/", nil
 }
 
-func (f *fakeCalDAV) EnsureCalendar(ctx context.Context, home, name string) (string, error) {
-	return home + "mirror/", nil
-}
-
-func (f *fakeCalDAV) CreateObject(ctx context.Context, path, ics string) (caldav.PutResult, error) {
-	if err := f.createErrPaths[path]; err != nil {
-		return caldav.PutResult{}, err
+func (f *fakeDest) CreateEvent(ctx context.Context, calRef string, ev feed.Event, tz []*ics.VTimezone) (string, string, error) {
+	if err := f.createErrUIDs[ev.UID]; err != nil {
+		return "", "", err
 	}
-	f.objects[path] = ics
+	f.objects[ev.UID] = ev.Summary
 	f.creates++
-	return caldav.PutResult{ETag: "etag-create"}, nil
+	return ev.UID, "etag-create", nil
 }
 
-func (f *fakeCalDAV) UpdateObject(ctx context.Context, path, ics string) (caldav.PutResult, error) {
-	f.objects[path] = ics
+func (f *fakeDest) UpdateEvent(ctx context.Context, calRef, ref string, ev feed.Event, tz []*ics.VTimezone) (string, error) {
+	f.objects[ref] = ev.Summary
 	f.updates++
-	return caldav.PutResult{ETag: "etag-update"}, nil
+	return "etag-update", nil
 }
 
-func (f *fakeCalDAV) DeleteObject(ctx context.Context, path string) error {
-	delete(f.objects, path)
+func (f *fakeDest) DeleteEvent(ctx context.Context, calRef, ref string) error {
+	delete(f.objects, ref)
 	f.deletes++
 	return nil
 }
@@ -87,7 +84,7 @@ func vevent(uid, summary string) string {
 		"\r\nDTSTART:20260615T170000Z\r\nDTEND:20260615T180000Z\r\nEND:VEVENT\r\n"
 }
 
-func newSyncer(t *testing.T, cd CalDAV, ff Fetcher) (*Syncer, *store.Store) {
+func newSyncer(t *testing.T, dest Destination, ff Fetcher) (*Syncer, *store.Store) {
 	t.Helper()
 	st, err := store.Open(":memory:")
 	if err != nil {
@@ -95,22 +92,23 @@ func newSyncer(t *testing.T, cd CalDAV, ff Fetcher) (*Syncer, *store.Store) {
 	}
 	t.Cleanup(func() { st.Close() })
 	return &Syncer{
-		Store:   st,
-		CalDAV:  cd,
-		Fetcher: ff,
-		Now:     func() time.Time { return time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC) },
+		Store:       st,
+		Destination: func(ctx context.Context, f config.Feed) (Destination, error) { return dest, nil },
+		Fetcher:     ff,
+		Now:         func() time.Time { return time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC) },
 	}, st
 }
 
 var testFeeds = []config.Feed{{
 	Name:                "hey",
+	Kind:                config.KindICloud,
 	SourceURL:           "https://hey/feed.ics",
 	DestinationCalendar: "HEY (synced)",
 	SyncWindow:          config.SyncWindow{PastDays: 30},
 }}
 
 func TestSyncCreateUpdateDeleteUnchanged(t *testing.T) {
-	cd := newFakeCalDAV()
+	cd := newFakeDest()
 	ff := &fakeFetcher{}
 	s, st := newSyncer(t, cd, ff)
 	ctx := context.Background()
@@ -157,7 +155,7 @@ func TestSyncCreateUpdateDeleteUnchanged(t *testing.T) {
 }
 
 func TestSyncFetchErrorLeavesMirrorIntact(t *testing.T) {
-	cd := newFakeCalDAV()
+	cd := newFakeDest()
 	ff := &fakeFetcher{}
 	s, st := newSyncer(t, cd, ff)
 	ctx := context.Background()
@@ -194,7 +192,7 @@ type fakeNotifier struct{ count int }
 func (f *fakeNotifier) Notify(title, body string) { f.count++ }
 
 func TestNotifyOnFailureOnsetOnly(t *testing.T) {
-	cd := newFakeCalDAV()
+	cd := newFakeDest()
 	ff := &fakeFetcher{}
 	s, _ := newSyncer(t, cd, ff)
 	nf := &fakeNotifier{}
@@ -229,13 +227,61 @@ func TestNotifyOnFailureOnsetOnly(t *testing.T) {
 	}
 }
 
-func TestSyncDiscoveryErrorIsFatal(t *testing.T) {
-	cd := newFakeCalDAV()
-	cd.discoverErr = errors.New("401 unauthorized")
-	ff := &fakeFetcher{parsed: mustParse(t, cal(vevent("a@x", "Alpha")))}
-	s, _ := newSyncer(t, cd, ff)
+// A destination that won't connect (e.g. iCloud discovery / Google OAuth) is a
+// per-feed failure, not a fatal one: it must be recorded against that feed
+// without aborting the pass, so a sibling feed on a healthy destination still
+// syncs.
+func TestDestinationErrorIsolatedPerFeed(t *testing.T) {
+	broken := newFakeDest()
+	broken.ensureErr = errors.New("401 unauthorized")
+	healthy := newFakeDest()
 
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	feeds := []config.Feed{
+		{Name: "broken", Kind: config.KindGoogle, SourceURL: "u", DestinationCalendar: "B", SyncWindow: config.SyncWindow{PastDays: 30}},
+		{Name: "healthy", Kind: config.KindICloud, SourceURL: "u", DestinationCalendar: "H", SyncWindow: config.SyncWindow{PastDays: 30}},
+	}
+	s := &Syncer{
+		Store: st,
+		Destination: func(ctx context.Context, f config.Feed) (Destination, error) {
+			if f.Name == "broken" {
+				return broken, nil
+			}
+			return healthy, nil
+		},
+		Fetcher: &fakeFetcher{parsed: mustParse(t, cal(vevent("a@x", "Alpha")))},
+		Now:     func() time.Time { return time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC) },
+	}
+
+	res, err := s.Sync(context.Background(), feeds)
+	if err != nil {
+		t.Fatalf("Sync returned fatal error: %v", err)
+	}
+	if res[0].Err == nil {
+		t.Fatalf("expected per-feed error on broken destination")
+	}
+	if res[1].Err != nil || res[1].Created != 1 {
+		t.Fatalf("healthy feed disturbed by sibling failure: %+v", res[1])
+	}
+	if len(healthy.objects) != 1 {
+		t.Fatalf("healthy destination objects = %d, want 1", len(healthy.objects))
+	}
+}
+
+// A nil destination factory is a programming error and should fail the pass.
+func TestSyncNoFactoryIsFatal(t *testing.T) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	s := &Syncer{Store: st, Fetcher: &fakeFetcher{}}
 	if _, err := s.Sync(context.Background(), testFeeds); err == nil {
-		t.Fatalf("expected fatal discovery error")
+		t.Fatalf("expected fatal error with no destination factory")
 	}
 }

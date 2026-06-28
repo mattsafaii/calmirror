@@ -31,9 +31,15 @@ func cmdStatus(args []string) int {
 		return 0
 	}
 
-	fmt.Printf("iCloud account: %s\n\n", cfg.ICloud.Username)
+	if cfg.ICloud.Username != "" {
+		fmt.Printf("iCloud account: %s\n", cfg.ICloud.Username)
+	}
+	if cfg.Google.Account != "" {
+		fmt.Printf("Google account: %s\n", cfg.Google.Account)
+	}
+	fmt.Println()
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "FEED\tEVENTS\tLAST SYNC\tLAST ERROR")
+	fmt.Fprintln(tw, "FEED\tKIND\tEVENTS\tLAST SYNC\tLAST ERROR")
 	for _, f := range cfg.Feeds {
 		count, _ := st.CountLinks(f.Name)
 		state, ok, _ := st.GetFeed(f.Name)
@@ -48,7 +54,7 @@ func cmdStatus(args []string) int {
 				lastErr = state.LastError
 			}
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", f.Name, count, lastSync, lastErr)
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\n", f.Name, f.Kind, count, lastSync, lastErr)
 	}
 	if err := tw.Flush(); err != nil {
 		return fail("%v", err)

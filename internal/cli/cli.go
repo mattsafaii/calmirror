@@ -6,15 +6,16 @@ import (
 	"os"
 )
 
-const usage = `calmirror mirrors ICS calendar feeds into iCloud via CalDAV.
+const usage = `calmirror mirrors ICS calendar feeds into iCloud or Google Calendar
+as full-fidelity native events.
 
 Usage:
   calmirror <command> [arguments]
 
 Commands:
-  setup       Add a feed and store the iCloud app-specific password
+  setup       Add a feed routed to a destination (iCloud or Google) and store its secret
   sync        Run one sync pass across all configured feeds
-  status      Show per-feed last-sync time, event counts, and last error
+  status      Show per-feed destination kind, last-sync time, event counts, and last error
   install     Register the launchd login-item that runs sync on a schedule
   uninstall   Remove the launchd login-item
 `

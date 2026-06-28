@@ -1,7 +1,8 @@
 // Package engine is CalMirror's mirror core: for each feed it fetches the ICS
 // source, diffs it against local state by ICS UID, and creates, updates, or
-// deletes events in the feed's dedicated CalDAV calendar. A failure on one feed
-// is isolated so it cannot corrupt another feed's sync.
+// deletes events in the feed's dedicated destination calendar (iCloud CalDAV or
+// Google Calendar). A failure on one feed is isolated so it cannot corrupt
+// another feed's sync.
 package engine
 
 import (
@@ -13,21 +14,35 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsafaii/calmirror/internal/caldav"
+	ics "github.com/arran4/golang-ical"
 	"github.com/mattsafaii/calmirror/internal/config"
 	"github.com/mattsafaii/calmirror/internal/feed"
 	"github.com/mattsafaii/calmirror/internal/store"
 )
 
-// CalDAV is the subset of the CalDAV client the engine needs. *caldav.Client
-// satisfies it; tests supply a fake.
-type CalDAV interface {
-	Discover(ctx context.Context) (caldav.Discovery, error)
-	EnsureCalendar(ctx context.Context, calendarHome, displayName string) (string, error)
-	CreateObject(ctx context.Context, path, icsData string) (caldav.PutResult, error)
-	UpdateObject(ctx context.Context, path, icsData string) (caldav.PutResult, error)
-	DeleteObject(ctx context.Context, path string) error
+// Destination is the abstraction over a calendar backend (iCloud CalDAV or
+// Google Calendar). The engine drives it generically: ensure the dedicated
+// mirror calendar exists, then create/update/delete events. Each implementation
+// owns its own serialization (ICS for CalDAV, the Calendar API event model for
+// Google), object naming, and credential handling.
+//
+// calRef is an opaque calendar handle returned by EnsureCalendar (a CalDAV
+// calendar path, a Google calendar id). ref is an opaque per-event handle
+// returned by CreateEvent (a CalDAV object href, a Google event id) and stored
+// as the EventLink href. etag is an optional version token; an empty value is
+// not an error.
+type Destination interface {
+	EnsureCalendar(ctx context.Context, displayName string) (calRef string, err error)
+	CreateEvent(ctx context.Context, calRef string, ev feed.Event, tz []*ics.VTimezone) (ref, etag string, err error)
+	UpdateEvent(ctx context.Context, calRef, ref string, ev feed.Event, tz []*ics.VTimezone) (etag string, err error)
+	DeleteEvent(ctx context.Context, calRef, ref string) error
 }
+
+// DestinationFor returns the Destination a feed should sync to. The CLI wires
+// this up from config + Keychain; tests supply a fake. An error here is treated
+// as a per-feed failure, isolating (for example) a broken Google credential
+// from a healthy iCloud feed.
+type DestinationFor func(ctx context.Context, f config.Feed) (Destination, error)
 
 // Fetcher retrieves and parses a feed. *feed.Fetcher satisfies it.
 type Fetcher interface {
@@ -42,11 +57,11 @@ type Notifier interface {
 // Syncer runs sync passes. Now defaults to time.Now if unset; Notifier is
 // optional (nil disables notifications).
 type Syncer struct {
-	Store    *store.Store
-	CalDAV   CalDAV
-	Fetcher  Fetcher
-	Notifier Notifier
-	Now      func() time.Time
+	Store       *store.Store
+	Destination DestinationFor
+	Fetcher     Fetcher
+	Notifier    Notifier
+	Now         func() time.Time
 }
 
 // FeedResult summarizes one feed's sync pass.
@@ -66,14 +81,14 @@ func (s *Syncer) now() time.Time {
 	return time.Now()
 }
 
-// Sync mirrors every feed. The returned error is non-nil only for a failure
-// that prevents any feed from syncing (e.g. iCloud discovery). Per-feed
-// failures are reported in the corresponding FeedResult.Err and recorded in
-// the store, leaving other feeds untouched.
+// Sync mirrors every feed. The returned error is non-nil only for a setup
+// failure that prevents the pass from running at all; per-feed failures
+// (including a destination that won't connect) are reported in the
+// corresponding FeedResult.Err and recorded in the store, leaving other feeds
+// untouched.
 func (s *Syncer) Sync(ctx context.Context, feeds []config.Feed) ([]FeedResult, error) {
-	disc, err := s.CalDAV.Discover(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("icloud discovery: %w", err)
+	if s.Destination == nil {
+		return nil, errors.New("engine: no destination factory configured")
 	}
 
 	results := make([]FeedResult, 0, len(feeds))
@@ -82,7 +97,7 @@ func (s *Syncer) Sync(ctx context.Context, feeds []config.Feed) ([]FeedResult, e
 		// previously-healthy feed that just broke), not on every scheduled run.
 		prior, _, _ := s.Store.GetFeed(f.Name)
 
-		res := s.syncFeed(ctx, disc.CalendarHome, f)
+		res := s.syncFeed(ctx, f)
 		now := s.now()
 		if res.Err != nil {
 			// Best-effort error recording; don't mask the sync error.
@@ -98,15 +113,23 @@ func (s *Syncer) Sync(ctx context.Context, feeds []config.Feed) ([]FeedResult, e
 	return results, nil
 }
 
-func (s *Syncer) syncFeed(ctx context.Context, calendarHome string, f config.Feed) FeedResult {
+func (s *Syncer) syncFeed(ctx context.Context, f config.Feed) FeedResult {
 	res := FeedResult{Feed: f.Name}
 
-	calPath, err := s.CalDAV.EnsureCalendar(ctx, calendarHome, f.DestinationCalendar)
+	// Build the feed's destination. A failure here (bad credentials, revoked
+	// OAuth) isolates to this feed, leaving other feeds untouched.
+	dest, err := s.Destination(ctx, f)
 	if err != nil {
 		res.Err = err
 		return res
 	}
-	if err := s.Store.SetDestinationCalendar(f.Name, calPath); err != nil {
+
+	calRef, err := dest.EnsureCalendar(ctx, f.DestinationCalendar)
+	if err != nil {
+		res.Err = err
+		return res
+	}
+	if err := s.Store.SetDestinationCalendar(f.Name, calRef); err != nil {
 		res.Err = err
 		return res
 	}
@@ -138,29 +161,27 @@ func (s *Syncer) syncFeed(ctx context.Context, calendarHome string, f config.Fee
 		}
 		seen[ev.UID] = true
 		hash := contentHash(ev)
-		body := feed.RenderICS(ev, parsed.Timezones)
 
 		link, exists := links[ev.UID]
 		switch {
 		case !exists:
-			href := strings.TrimRight(calPath, "/") + "/" + objectName(ev.UID) + ".ics"
-			put, err := s.CalDAV.CreateObject(ctx, href, body)
+			ref, etag, err := dest.CreateEvent(ctx, calRef, ev, parsed.Timezones)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("create %q: %w", ev.UID, err))
 				continue
 			}
 			_ = s.Store.UpsertLink(store.EventLink{
-				FeedName: f.Name, UID: ev.UID, Href: href,
-				ETag: put.ETag, ContentHash: hash, LastSeenAt: now,
+				FeedName: f.Name, UID: ev.UID, Href: ref,
+				ETag: etag, ContentHash: hash, LastSeenAt: now,
 			})
 			res.Created++
 		case link.ContentHash != hash:
-			put, err := s.CalDAV.UpdateObject(ctx, link.Href, body)
+			etag, err := dest.UpdateEvent(ctx, calRef, link.Href, ev, parsed.Timezones)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("update %q: %w", ev.UID, err))
 				continue
 			}
-			link.ETag = put.ETag
+			link.ETag = etag
 			link.ContentHash = hash
 			link.LastSeenAt = now
 			_ = s.Store.UpsertLink(link)
@@ -177,7 +198,7 @@ func (s *Syncer) syncFeed(ctx context.Context, calendarHome string, f config.Fee
 		if seen[uid] {
 			continue
 		}
-		if err := s.CalDAV.DeleteObject(ctx, link.Href); err != nil {
+		if err := dest.DeleteEvent(ctx, calRef, link.Href); err != nil {
 			errs = append(errs, fmt.Errorf("delete %q: %w", uid, err))
 			continue
 		}
@@ -252,10 +273,4 @@ func contentHash(e feed.Event) string {
 	writeField(e.LastModified.UTC().Format(time.RFC3339))
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:])
-}
-
-// objectName derives a stable, path-safe filename stem from an ICS UID.
-func objectName(uid string) string {
-	sum := sha256.Sum256([]byte(uid))
-	return hex.EncodeToString(sum[:16])
 }
