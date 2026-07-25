@@ -1,5 +1,2 @@
 name: calmirror
-processes:
-  Claude:
-    command: claude
-    auto_start: true
+processes: {}
