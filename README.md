@@ -89,9 +89,11 @@ calmirror uninstall
 
 # Optional: run in the foreground — sync whenever a HEY calendar event changes.
 # Requires the hey CLI (github.com/basecamp/hey-cli) and `hey auth login`;
-# `calmirror install` wires this up automatically when hey is present. If hey
-# fails (signed out, rate-limited), watch backs off from 1 to 30 minutes
-# between retries instead of hammering HEY's sign-in.
+# `calmirror install` wires this up automatically when hey is present. Network
+# and server failures are retried with 1–30 minute backoff. A HEY sign-in
+# failure stops the watch and posts a notification instead, since retrying a
+# refused sign-in only extends HEY's rate limit: run `hey auth login`, then
+# `calmirror install` to start it again.
 calmirror watch
 ```
 

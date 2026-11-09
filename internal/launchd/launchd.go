@@ -39,7 +39,8 @@ func Install(binPath string, interval time.Duration, logPath string) error {
 }
 
 // InstallWatch writes the watch agent's plist and (re)loads it. The job runs
-// `calmirror watch` at load and launchd restarts it whenever it exits. It logs
+// `calmirror watch` at load and launchd restarts it whenever it crashes (exits
+// non-zero); a clean exit leaves it stopped. It logs
 // to logPath. binPath is the calmirror executable to invoke.
 func InstallWatch(binPath string, logPath string) error {
 	return installPlist(WatchLabel,
@@ -135,7 +136,7 @@ const keepAliveThrottleSecs = 300
 
 // renderPlist renders a launchd property list running one calmirror subcommand.
 // startIntervalSecs adds a StartInterval key when > 0; keepAlive asks launchd
-// to relaunch the job whenever it exits.
+// to relaunch the job whenever it exits unsuccessfully.
 func renderPlist(label string, args []string, startIntervalSecs int, keepAlive bool, logPath string) string {
 	var intervalKey, keepAliveKey string
 	if startIntervalSecs > 0 {
@@ -145,9 +146,12 @@ func renderPlist(label string, args []string, startIntervalSecs int, keepAlive b
 		intervalKey = fmt.Sprintf("\t<key>StartInterval</key>\n\t<integer>%d</integer>\n", startIntervalSecs)
 	}
 	if keepAlive {
-		// ThrottleInterval spaces out relaunches, so a job that keeps failing
-		// at startup cannot hammer HEY's sign-in (launchd's default is 10s).
-		keepAliveKey = fmt.Sprintf("\t<key>KeepAlive</key>\n\t<true/>\n\t<key>ThrottleInterval</key>\n\t<integer>%d</integer>\n", keepAliveThrottleSecs)
+		// Relaunch only after a crash (a non-zero exit). A job that exits 0 on
+		// purpose — the watch agent stopping on a HEY sign-in failure — stays
+		// stopped until the next login or reinstall. ThrottleInterval spaces
+		// out the relaunches that do happen (launchd's default is 10s).
+		keepAliveKey = fmt.Sprintf("\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<false/>\n\t</dict>\n"+
+			"\t<key>ThrottleInterval</key>\n\t<integer>%d</integer>\n", keepAliveThrottleSecs)
 	}
 
 	var progArgs strings.Builder

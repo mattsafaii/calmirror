@@ -73,7 +73,16 @@ func (e *Error) Error() string {
 // Auth reports whether the run failed on sign-in: HEY needs `hey auth login`,
 // or refused to refresh the token.
 func (e *Error) Auth() bool {
-	return e.ExitCode == ExitAuth || strings.Contains(e.Message, "token refresh failed")
+	return SignInFailure(e.ExitCode, e.Message)
+}
+
+// SignInFailure reports whether a hey run with this exit status and output
+// failed on sign-in rather than on something that clears by itself. HEY needs
+// `hey auth login` (exit 3), or refused to refresh the token, which the CLI
+// reports as an API failure (exit 7) and which HEY rate-limits: retrying a
+// refused refresh only extends the lockout.
+func SignInFailure(exitCode int, output string) bool {
+	return exitCode == ExitAuth || strings.Contains(output, "token refresh failed")
 }
 
 // RateLimited reports whether HEY rate-limited the run.
