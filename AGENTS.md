@@ -75,7 +75,7 @@ Phase 1 shipped a headless engine (fetch → diff by UID → create/update/delet
 
 ## Basecamp
 
-This project's Basecamp config (account/project/todolist IDs) is already set in `.basecamp/config.json` (gitignored), so `basecamp` commands work without flags from this directory. The Basecamp project is still named **CalMirror**. The work for this cycle is the **"Build: Phase 2 — Google Calendar"** todolist — run `basecamp todos list` to see it; check each off as you complete it. The Phase 2 PRD is the doc titled `PRD: Phase 2 — Google Calendar` (run `basecamp docs list` and match by title); the full product PRD is `CalMirror — PRD`. The pitch and context live on the project's card.
+This project's Basecamp config (account/project/todolist IDs) is already set in `.basecamp/config.json` (gitignored), so `basecamp` commands work without flags from this directory. The Basecamp project is **Heyday** (renamed from CalMirror; the doc `Heyday — rename and scope change (Nov 2026)` records the change, and the older PRDs keep their CalMirror titles as history). The work for this cycle is the **"Build: Phase 2 — Google Calendar"** todolist — run `basecamp todos list` to see it; check each off as you complete it. The Phase 2 PRD is the doc titled `PRD: Phase 2 — Google Calendar` (run `basecamp docs list` and match by title); the full product PRD is `CalMirror — PRD`. The pitch and context live on the project's card.
 
 ## Solo
 
