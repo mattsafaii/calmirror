@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test
+    # CalMirror is macOS-only: the Keychain, launchd and osascript code paths
+    # and their tests need a Mac.
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # The keychain tests write a throwaway item through the `security` CLI,
+      # which uses the default keychain. Give the job its own unlocked one so
+      # nothing prompts or depends on the runner's login keychain.
+      - name: Set up a temporary keychain
+        run: |
+          security create-keychain -p ci "$RUNNER_TEMP/ci.keychain-db"
+          security set-keychain-settings -lut 3600 "$RUNNER_TEMP/ci.keychain-db"
+          security unlock-keychain -p ci "$RUNNER_TEMP/ci.keychain-db"
+          security list-keychains -d user -s "$RUNNER_TEMP/ci.keychain-db"
+          security default-keychain -s "$RUNNER_TEMP/ci.keychain-db"
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Check go.mod and go.sum are tidy
+        run: go mod tidy -diff
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
