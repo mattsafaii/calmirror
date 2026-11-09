@@ -1,5 +1,5 @@
-// Package launchd installs and removes CalMirror's launchd login-items: the
-// scheduled `calmirror sync` job and the optional HEY watch agent, so both run
+// Package launchd installs and removes Heyday's launchd login-items: the
+// scheduled `heyday sync` job and the optional HEY watch agent, so both run
 // after login with no manual plist editing.
 package launchd
 
@@ -16,12 +16,12 @@ import (
 
 const (
 	// Label is the launchd job label (and plist base name) of the scheduled sync.
-	Label = "com.calmirror.sync"
+	Label = "com.mattsafaii.heyday.sync"
 	// WatchLabel is the launchd job label of the HEY watch agent.
-	WatchLabel = "com.calmirror.watch"
+	WatchLabel = "com.mattsafaii.heyday.watch"
 )
 
-// PlistPath returns the per-user LaunchAgents path for a CalMirror job label.
+// PlistPath returns the per-user LaunchAgents path for a Heyday job label.
 func PlistPath(label string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -31,17 +31,17 @@ func PlistPath(label string) (string, error) {
 }
 
 // Install writes the sync job's plist and (re)loads it. The job runs
-// `calmirror sync` at load (login) and every interval thereafter. It logs to
-// logPath. binPath is the calmirror executable to invoke.
+// `heyday sync` at load (login) and every interval thereafter. It logs to
+// logPath. binPath is the heyday executable to invoke.
 func Install(binPath string, interval time.Duration, logPath string) error {
 	return installPlist(Label,
 		renderPlist(Label, []string{binPath, "sync"}, int(interval.Seconds()), false, logPath))
 }
 
 // InstallWatch writes the watch agent's plist and (re)loads it. The job runs
-// `calmirror watch` at load and launchd restarts it whenever it crashes (exits
+// `heyday watch` at load and launchd restarts it whenever it crashes (exits
 // non-zero); a clean exit leaves it stopped. It logs
-// to logPath. binPath is the calmirror executable to invoke.
+// to logPath. binPath is the heyday executable to invoke.
 func InstallWatch(binPath string, logPath string) error {
 	return installPlist(WatchLabel,
 		renderPlist(WatchLabel, []string{binPath, "watch"}, 0, true, logPath))
@@ -86,7 +86,33 @@ func domainTarget() string {
 	return "gui/" + strconv.Itoa(os.Getuid())
 }
 
-func run(name string, args ...string) error {
+// LegacyLabels are the launchd jobs CalMirror, Heyday's former name,
+// installed. They ran the old binary, so Heyday removes them on install.
+var LegacyLabels = []string{"com.calmirror.sync", "com.calmirror.watch"}
+
+// RemoveLegacy unloads and deletes any CalMirror-era jobs, returning the
+// labels whose plist it removed. A job that was never installed is skipped.
+func RemoveLegacy() ([]string, error) {
+	var removed []string
+	for _, label := range LegacyLabels {
+		installed, err := labelInstalled(label)
+		if err != nil {
+			return removed, err
+		}
+		if !installed {
+			continue
+		}
+		if err := uninstallLabel(label); err != nil {
+			return removed, fmt.Errorf("remove old job %s: %w", label, err)
+		}
+		removed = append(removed, label)
+	}
+	return removed, nil
+}
+
+// run executes a command (launchctl). It is a variable so tests can stand in
+// for launchctl without touching the user's real launchd jobs.
+var run = func(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -134,7 +160,7 @@ func uninstallLabel(label string) error {
 // keepAliveThrottleSecs is the minimum gap between relaunches of a KeepAlive job.
 const keepAliveThrottleSecs = 300
 
-// renderPlist renders a launchd property list running one calmirror subcommand.
+// renderPlist renders a launchd property list running one heyday subcommand.
 // startIntervalSecs adds a StartInterval key when > 0; keepAlive asks launchd
 // to relaunch the job whenever it exits unsuccessfully.
 func renderPlist(label string, args []string, startIntervalSecs int, keepAlive bool, logPath string) string {

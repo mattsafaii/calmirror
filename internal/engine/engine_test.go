@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
-	ics "github.com/arran4/golang-ical"
-	"github.com/mattsafaii/calmirror/internal/config"
-	"github.com/mattsafaii/calmirror/internal/feed"
-	"github.com/mattsafaii/calmirror/internal/store"
+	"github.com/mattsafaii/heyday/internal/config"
+	"github.com/mattsafaii/heyday/internal/feed"
+	"github.com/mattsafaii/heyday/internal/store"
 )
 
 // fakeDest is an in-memory Destination stand-in. Events are keyed by the ref it
@@ -35,7 +34,7 @@ func (f *fakeDest) EnsureCalendar(ctx context.Context, displayName string) (stri
 	return "cal/" + displayName + "/", nil
 }
 
-func (f *fakeDest) CreateEvent(ctx context.Context, calRef string, ev feed.Event, tz []*ics.VTimezone) (string, string, error) {
+func (f *fakeDest) CreateEvent(ctx context.Context, calRef string, ev feed.Event) (string, string, error) {
 	if err := f.createErrUIDs[ev.UID]; err != nil {
 		return "", "", err
 	}
@@ -44,7 +43,7 @@ func (f *fakeDest) CreateEvent(ctx context.Context, calRef string, ev feed.Event
 	return ev.UID, "etag-create", nil
 }
 
-func (f *fakeDest) UpdateEvent(ctx context.Context, calRef, ref string, ev feed.Event, tz []*ics.VTimezone) (string, error) {
+func (f *fakeDest) UpdateEvent(ctx context.Context, calRef, ref string, ev feed.Event) (string, error) {
 	f.objects[ref] = ev.Summary
 	f.updates++
 	return "etag-update", nil
@@ -101,7 +100,6 @@ func newSyncer(t *testing.T, dest Destination, ff Fetcher) (*Syncer, *store.Stor
 
 var testFeeds = []config.Feed{{
 	Name:                "hey",
-	Kind:                config.KindICloud,
 	SourceURL:           "https://hey/feed.ics",
 	DestinationCalendar: "HEY (synced)",
 	SyncWindow:          config.SyncWindow{PastDays: 30},
@@ -227,7 +225,7 @@ func TestNotifyOnFailureOnsetOnly(t *testing.T) {
 	}
 }
 
-// A destination that won't connect (e.g. iCloud discovery / Google OAuth) is a
+// A destination that won't connect (e.g. revoked Google OAuth) is a
 // per-feed failure, not a fatal one: it must be recorded against that feed
 // without aborting the pass, so a sibling feed on a healthy destination still
 // syncs.
@@ -243,8 +241,8 @@ func TestDestinationErrorIsolatedPerFeed(t *testing.T) {
 	t.Cleanup(func() { st.Close() })
 
 	feeds := []config.Feed{
-		{Name: "broken", Kind: config.KindGoogle, SourceURL: "u", DestinationCalendar: "B", SyncWindow: config.SyncWindow{PastDays: 30}},
-		{Name: "healthy", Kind: config.KindICloud, SourceURL: "u", DestinationCalendar: "H", SyncWindow: config.SyncWindow{PastDays: 30}},
+		{Name: "broken", SourceURL: "u", DestinationCalendar: "B", SyncWindow: config.SyncWindow{PastDays: 30}},
+		{Name: "healthy", SourceURL: "u", DestinationCalendar: "H", SyncWindow: config.SyncWindow{PastDays: 30}},
 	}
 	s := &Syncer{
 		Store: st,

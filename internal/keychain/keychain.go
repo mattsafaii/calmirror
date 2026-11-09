@@ -1,5 +1,5 @@
-// Package keychain stores and retrieves the iCloud app-specific password in the
-// macOS Keychain by shelling out to the built-in `security` tool. No secret is
+// Package keychain stores and retrieves Heyday's Google OAuth secrets (the
+// refresh token and client secret) in the macOS Keychain by shelling out to the built-in `security` tool. No secret is
 // ever written to config or the SQLite store.
 package keychain
 
@@ -11,9 +11,9 @@ import (
 	"strings"
 )
 
-// service is the Keychain generic-password service name under which CalMirror
-// stores credentials. The account is the iCloud username.
-const service = "calmirror"
+// service is the Keychain generic-password service name under which Heyday
+// stores credentials. The account names the secret (see internal/google).
+const service = "heyday"
 
 // ErrNotFound is returned by Get when no password is stored for the account.
 var ErrNotFound = errors.New("keychain: password not found")

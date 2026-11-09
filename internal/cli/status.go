@@ -8,13 +8,13 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/mattsafaii/calmirror/internal/config"
+	"github.com/mattsafaii/heyday/internal/config"
 )
 
 func cmdStatus(args []string) int {
 	cfg, err := config.Load()
 	if errors.Is(err, fs.ErrNotExist) {
-		return fail("not set up yet; run `calmirror setup` first")
+		return fail("not set up yet; run `heyday setup` first")
 	}
 	if err != nil {
 		return fail("load config: %v", err)
@@ -31,15 +31,12 @@ func cmdStatus(args []string) int {
 		return 0
 	}
 
-	if cfg.ICloud.Username != "" {
-		fmt.Printf("iCloud account: %s\n", cfg.ICloud.Username)
-	}
 	if cfg.Google.Account != "" {
 		fmt.Printf("Google account: %s\n", cfg.Google.Account)
 	}
 	fmt.Println()
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "FEED\tSOURCE\tKIND\tEVENTS\tLAST SYNC\tLAST ERROR")
+	fmt.Fprintln(tw, "FEED\tSOURCE\tGOOGLE CALENDAR\tEVENTS\tLAST SYNC\tLAST ERROR")
 	for _, f := range cfg.Feeds {
 		count, _ := st.CountLinks(f.Name)
 		state, ok, _ := st.GetFeed(f.Name)
@@ -54,7 +51,7 @@ func cmdStatus(args []string) int {
 				lastErr = state.LastError
 			}
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", f.Name, sourceLabel(f), f.Kind, count, lastSync, lastErr)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", f.Name, sourceLabel(f), f.DestinationCalendar, count, lastSync, lastErr)
 	}
 	if err := tw.Flush(); err != nil {
 		return fail("%v", err)

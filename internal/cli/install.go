@@ -7,17 +7,17 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/mattsafaii/calmirror/internal/config"
-	"github.com/mattsafaii/calmirror/internal/hey"
-	"github.com/mattsafaii/calmirror/internal/launchd"
+	"github.com/mattsafaii/heyday/internal/config"
+	"github.com/mattsafaii/heyday/internal/hey"
+	"github.com/mattsafaii/heyday/internal/launchd"
 )
 
 func cmdInstall(args []string) int {
 	fset := flag.NewFlagSet("install", flag.ContinueOnError)
 	interval := fset.Int("interval", 15, "minutes between scheduled syncs")
 	fset.Usage = func() {
-		fmt.Fprintf(fset.Output(), "Usage: calmirror install [--interval <minutes>]\n\n")
-		fmt.Fprintf(fset.Output(), "Registers the launchd login-items that run `calmirror sync` on a schedule,\n")
+		fmt.Fprintf(fset.Output(), "Usage: heyday install [--interval <minutes>]\n\n")
+		fmt.Fprintf(fset.Output(), "Registers the launchd login-items that run `heyday sync` on a schedule,\n")
 		fmt.Fprintf(fset.Output(), "plus — when the hey CLI is installed — a watch agent that syncs near-instantly\n")
 		fmt.Fprintf(fset.Output(), "as HEY calendars change.\n\n")
 		fset.PrintDefaults()
@@ -42,6 +42,7 @@ func cmdInstall(args []string) int {
 		return fail("%v", err)
 	}
 
+	removeLegacyJobs()
 	if err := launchd.Install(bin, time.Duration(*interval)*time.Minute, logPath); err != nil {
 		return fail("%v", err)
 	}
@@ -52,7 +53,7 @@ func cmdInstall(args []string) int {
 	watchLog := filepath.Join(filepath.Dir(logPath), "watch.log")
 	if _, err := hey.Find(); err != nil {
 		fmt.Println("hey CLI not found; skipping the watch agent (scheduled syncs still run).")
-		fmt.Println("Install it from github.com/basecamp/hey-cli, then re-run `calmirror install`.")
+		fmt.Println("Install it from github.com/basecamp/hey-cli, then re-run `heyday install`.")
 		return 0
 	}
 	if err := launchd.InstallWatch(bin, watchLog); err != nil {
@@ -65,6 +66,7 @@ func cmdInstall(args []string) int {
 }
 
 func cmdUninstall(args []string) int {
+	removeLegacyJobs()
 	if err := launchd.Uninstall(); err != nil {
 		return fail("%v", err)
 	}
@@ -74,6 +76,19 @@ func cmdUninstall(args []string) int {
 	}
 	fmt.Printf("Removed launchd job %s.\n", launchd.WatchLabel)
 	return 0
+}
+
+// removeLegacyJobs removes CalMirror's old launchd jobs, so the old binary
+// stops running alongside Heyday. A failure is only a warning: it should not
+// block installing or removing Heyday's own jobs.
+func removeLegacyJobs() {
+	removed, err := launchd.RemoveLegacy()
+	for _, label := range removed {
+		fmt.Printf("Removed old CalMirror launchd job %s.\n", label)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
 }
 
 // logFilePath returns the path the scheduled sync logs to, alongside the config.

@@ -2,6 +2,7 @@
 .basecamp/
 
 # Build artifacts
+/heyday
 /calmirror
 /dist/
 *.out

@@ -9,22 +9,22 @@ import (
 	"os/signal"
 	"path/filepath"
 
-	"github.com/mattsafaii/calmirror/internal/config"
-	"github.com/mattsafaii/calmirror/internal/engine"
-	"github.com/mattsafaii/calmirror/internal/notify"
-	"github.com/mattsafaii/calmirror/internal/store"
+	"github.com/mattsafaii/heyday/internal/config"
+	"github.com/mattsafaii/heyday/internal/engine"
+	"github.com/mattsafaii/heyday/internal/notify"
+	"github.com/mattsafaii/heyday/internal/store"
 )
 
 func cmdSync(args []string) int {
 	cfg, err := config.Load()
 	if errors.Is(err, fs.ErrNotExist) {
-		return fail("not set up yet; run `calmirror setup` first")
+		return fail("not set up yet; run `heyday setup` first")
 	}
 	if err != nil {
 		return fail("load config: %v", err)
 	}
 	if len(cfg.Feeds) == 0 {
-		fmt.Println("No feeds configured. Run `calmirror setup` to add one.")
+		fmt.Println("No feeds configured. Run `heyday setup` to add one.")
 		return 0
 	}
 

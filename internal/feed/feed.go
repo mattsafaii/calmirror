@@ -15,8 +15,8 @@ import (
 	ics "github.com/arran4/golang-ical"
 )
 
-// userAgent identifies CalMirror to feed hosts.
-const userAgent = "CalMirror/0.1 (+https://github.com/mattsafaii/calmirror)"
+// userAgent identifies Heyday to feed hosts.
+const userAgent = "Heyday/0.1 (+https://github.com/mattsafaii/heyday)"
 
 // Event is a normalized calendar event extracted from a source VEVENT. The
 // extracted fields drive sync-window filtering, change detection, and status

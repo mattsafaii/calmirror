@@ -1,8 +1,7 @@
-// Package engine is CalMirror's mirror core: for each feed it reads the source
+// Package engine is Heyday's mirror core: for each feed it reads the source
 // (an ICS feed, or HEY calendars via the hey CLI), diffs it against local state
 // by event UID, and creates, updates, or
-// deletes events in the feed's dedicated destination calendar (iCloud CalDAV or
-// Google Calendar). A failure on one feed is isolated so it cannot corrupt
+// deletes events in the feed's dedicated Google calendar. A failure on one feed is isolated so it cannot corrupt
 // another feed's sync.
 package engine
 
@@ -15,34 +14,31 @@ import (
 	"strings"
 	"time"
 
-	ics "github.com/arran4/golang-ical"
-	"github.com/mattsafaii/calmirror/internal/config"
-	"github.com/mattsafaii/calmirror/internal/feed"
-	"github.com/mattsafaii/calmirror/internal/store"
+	"github.com/mattsafaii/heyday/internal/config"
+	"github.com/mattsafaii/heyday/internal/feed"
+	"github.com/mattsafaii/heyday/internal/store"
 )
 
-// Destination is the abstraction over a calendar backend (iCloud CalDAV or
-// Google Calendar). The engine drives it generically: ensure the dedicated
-// mirror calendar exists, then create/update/delete events. Each implementation
-// owns its own serialization (ICS for CalDAV, the Calendar API event model for
-// Google), object naming, and credential handling.
+// Destination is the calendar the engine writes to: Google Calendar in
+// production, a fake in tests. The engine drives it generically: ensure the
+// dedicated mirror calendar exists, then create/update/delete events. The
+// implementation owns serialization and credentials.
 //
-// calRef is an opaque calendar handle returned by EnsureCalendar (a CalDAV
-// calendar path, a Google calendar id). ref is an opaque per-event handle
-// returned by CreateEvent (a CalDAV object href, a Google event id) and stored
-// as the EventLink href. etag is an optional version token; an empty value is
-// not an error.
+// calRef is an opaque calendar handle returned by EnsureCalendar (a Google
+// calendar id). ref is an opaque per-event handle returned by CreateEvent (a
+// Google event id) and stored as the EventLink href. etag is an optional
+// version token; an empty value is not an error.
 type Destination interface {
 	EnsureCalendar(ctx context.Context, displayName string) (calRef string, err error)
-	CreateEvent(ctx context.Context, calRef string, ev feed.Event, tz []*ics.VTimezone) (ref, etag string, err error)
-	UpdateEvent(ctx context.Context, calRef, ref string, ev feed.Event, tz []*ics.VTimezone) (etag string, err error)
+	CreateEvent(ctx context.Context, calRef string, ev feed.Event) (ref, etag string, err error)
+	UpdateEvent(ctx context.Context, calRef, ref string, ev feed.Event) (etag string, err error)
 	DeleteEvent(ctx context.Context, calRef, ref string) error
 }
 
 // DestinationFor returns the Destination a feed should sync to. The CLI wires
 // this up from config + Keychain; tests supply a fake. An error here is treated
-// as a per-feed failure, isolating (for example) a broken Google credential
-// from a healthy iCloud feed.
+// as a per-feed failure, so one feed's broken destination (a revoked token, a
+// deleted calendar) never stops the others.
 type DestinationFor func(ctx context.Context, f config.Feed) (Destination, error)
 
 // Fetcher reads a feed's events from its source. start and end are the feed's
@@ -107,7 +103,7 @@ func (s *Syncer) Sync(ctx context.Context, feeds []config.Feed) ([]FeedResult, e
 			// Best-effort error recording; don't mask the sync error.
 			_ = s.Store.RecordSyncError(f.Name, res.Err.Error(), now)
 			if s.Notifier != nil && prior.LastError == "" {
-				s.Notifier.Notify("CalMirror: "+f.Name+" sync failed", res.Err.Error())
+				s.Notifier.Notify("Heyday: "+f.Name+" sync failed", res.Err.Error())
 			}
 		} else {
 			_ = s.Store.RecordSyncSuccess(f.Name, now)
@@ -169,7 +165,7 @@ func (s *Syncer) syncFeed(ctx context.Context, f config.Feed) FeedResult {
 		link, exists := links[ev.UID]
 		switch {
 		case !exists:
-			ref, etag, err := dest.CreateEvent(ctx, calRef, ev, parsed.Timezones)
+			ref, etag, err := dest.CreateEvent(ctx, calRef, ev)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("create %q: %w", ev.UID, err))
 				continue
@@ -180,7 +176,7 @@ func (s *Syncer) syncFeed(ctx context.Context, f config.Feed) FeedResult {
 			})
 			res.Created++
 		case link.ContentHash != hash:
-			etag, err := dest.UpdateEvent(ctx, calRef, link.Href, ev, parsed.Timezones)
+			etag, err := dest.UpdateEvent(ctx, calRef, link.Href, ev)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("update %q: %w", ev.UID, err))
 				continue
@@ -252,7 +248,7 @@ func filterWindow(events []feed.Event, start, end time.Time) []feed.Event {
 	return out
 }
 
-// contentHash is a deterministic fingerprint of the event fields CalMirror
+// contentHash is a deterministic fingerprint of the event fields Heyday
 // mirrors. It is computed from normalized fields rather than re-serialized ICS
 // because property-parameter order from the parser is not stable, which would
 // otherwise cause spurious updates every sync.

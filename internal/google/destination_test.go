@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mattsafaii/calmirror/internal/feed"
+	"github.com/mattsafaii/heyday/internal/feed"
 )
 
 func parseOne(t *testing.T, vevent string) feed.Event {
