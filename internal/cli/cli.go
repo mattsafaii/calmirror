@@ -16,8 +16,9 @@ Commands:
   setup       Add a feed routed to a destination (iCloud or Google) and store its secret
   sync        Run one sync pass across all configured feeds
   status      Show per-feed destination kind, last-sync time, event counts, and last error
-  install     Register the launchd login-item that runs sync on a schedule
-  uninstall   Remove the launchd login-item
+  watch       Sync whenever HEY calendars change (requires the hey CLI)
+  install     Register launchd login-items: scheduled syncs, plus the HEY watch agent
+  uninstall   Remove the launchd login-items
 `
 
 // Run dispatches args[0] to the matching subcommand and returns a process exit
@@ -36,6 +37,8 @@ func Run(args []string) int {
 		return cmdSync(rest)
 	case "status":
 		return cmdStatus(rest)
+	case "watch":
+		return cmdWatch(rest)
 	case "install":
 		return cmdInstall(rest)
 	case "uninstall":

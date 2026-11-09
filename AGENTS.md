@@ -25,6 +25,7 @@ The work: extract a `Destination` abstraction from the engine's current hardwire
 ## Surfaces (CLI)
 
 - **`calmirror setup`** — add a feed (source ICS URL + destination calendar name). Now choose a **destination kind**: iCloud (app-specific password → Keychain) or Google (browser OAuth consent → refresh token in Keychain).
+  Choose a **source**: `ics` (a feed URL, the default) or `hey` (HEY calendars read through the hey CLI, `--hey-calendar <id|all>`; the CLI owns HEY sign-in, and repeating events are mirrored as expanded occurrences within a bounded window, 60 days ahead by default).
 - **`calmirror sync`** — one sync pass across all feeds; each feed routes to its own destination.
 - **`calmirror status`** — per-feed **destination kind**, last-sync time, event counts, last error.
 - **`calmirror install` / `uninstall`** — register/remove the launchd login-item (unchanged).
@@ -39,7 +40,7 @@ The work: extract a `Destination` abstraction from the engine's current hardwire
 
 ## Data model (local SQLite)
 
-- **Feed:** id, source URL, **destination kind (icloud/google)**, destination calendar id/name, sync window, last-sync time, last-error. One destination per feed (mirror to both = two feeds).
+- **Feed:** id, **source kind (ics/hey)**, source URL (ics) or HEY calendar id (hey, 0 = all), **destination kind (icloud/google)**, destination calendar id/name, sync window, last-sync time, last-error. One destination per feed (mirror to both = two feeds).
 - **EventLink:** feed id, ICS `UID`, destination event id/href, content hash/ETag (change detection), last-seen timestamp. The href/ETag fields generalize across destinations.
 - Secrets (iCloud app-specific password, Google OAuth refresh token) live in the **macOS Keychain**, never in SQLite or config files.
 

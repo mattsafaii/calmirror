@@ -18,10 +18,23 @@ import (
 // feed does not specify its own window.
 const DefaultSyncWindowPastDays = 30
 
+// DefaultHEYFutureDays is how far ahead a HEY feed reads when it does not set
+// its own window. HEY feeds expand repeating events into occurrences, which
+// needs a bounded window.
+const DefaultHEYFutureDays = 60
+
 // Destination kinds. A feed routes to exactly one.
 const (
 	KindICloud = "icloud"
 	KindGoogle = "google"
+)
+
+// Source kinds: where a feed's events come from.
+const (
+	// SourceICS fetches an ICS feed URL (Basecamp, any calendar feed).
+	SourceICS = "ics"
+	// SourceHEY reads HEY calendars through the hey CLI, which owns sign-in.
+	SourceHEY = "hey"
 )
 
 // Config is the complete CalMirror configuration as stored on disk. The iCloud
@@ -49,16 +62,23 @@ type Google struct {
 	ClientID string `json:"client_id,omitempty"`
 }
 
-// Feed describes one mirror: an ICS source fetched into a dedicated calendar on
-// the chosen destination. Name is the stable identifier used as the local-state
-// key and in CLI output. Kind selects the destination backend (icloud/google);
-// an empty Kind defaults to icloud for Phase 1 backward compatibility. Mutable
+// Feed describes one mirror: a source (an ICS URL, or HEY calendars via the hey
+// CLI) copied into a dedicated calendar on the chosen destination. Name is the
+// stable identifier used as the local-state key and in CLI output. Source
+// selects where events come from (ics/hey); an empty Source is ics, as every
+// feed was before HEY support. Kind selects the destination backend
+// (icloud/google); an empty Kind defaults to icloud for Phase 1 backward
+// compatibility. Mutable
 // per-run state (last-sync time, last error, event counts) lives in the SQLite
 // store, not in config.
 type Feed struct {
-	Name                string     `json:"name"`
-	Kind                string     `json:"kind"`
-	SourceURL           string     `json:"source_url"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Source    string `json:"source,omitempty"`
+	SourceURL string `json:"source_url,omitempty"`
+	// HEYCalendarID narrows a HEY feed to one calendar (from `hey calendar
+	// list`). 0 means every calendar switched on in HEY.
+	HEYCalendarID       int64      `json:"hey_calendar_id,omitempty"`
 	DestinationCalendar string     `json:"destination_calendar"`
 	SyncWindow          SyncWindow `json:"sync_window"`
 }
@@ -168,6 +188,12 @@ func (c *Config) applyDefaults() {
 		if strings.TrimSpace(c.Feeds[i].Kind) == "" {
 			c.Feeds[i].Kind = KindICloud
 		}
+		if strings.TrimSpace(c.Feeds[i].Source) == "" {
+			c.Feeds[i].Source = SourceICS
+		}
+		if c.Feeds[i].Source == SourceHEY && c.Feeds[i].SyncWindow.FutureDays == 0 {
+			c.Feeds[i].SyncWindow.FutureDays = DefaultHEYFutureDays
+		}
 	}
 }
 
@@ -181,14 +207,30 @@ func (c *Config) Validate() error {
 		switch {
 		case strings.TrimSpace(f.Name) == "":
 			return fmt.Errorf("feeds[%d]: name is required", i)
-		case strings.TrimSpace(f.SourceURL) == "":
-			return fmt.Errorf("feed %q: source_url is required", f.Name)
 		case strings.TrimSpace(f.DestinationCalendar) == "":
 			return fmt.Errorf("feed %q: destination_calendar is required", f.Name)
 		case f.SyncWindow.PastDays < 0:
 			return fmt.Errorf("feed %q: sync_window.past_days cannot be negative", f.Name)
 		case f.SyncWindow.FutureDays < 0:
 			return fmt.Errorf("feed %q: sync_window.future_days cannot be negative", f.Name)
+		}
+		switch f.Source {
+		case SourceICS, "": // "" before applyDefaults
+			if strings.TrimSpace(f.SourceURL) == "" {
+				return fmt.Errorf("feed %q: source_url is required", f.Name)
+			}
+			if f.HEYCalendarID != 0 {
+				return fmt.Errorf("feed %q: hey_calendar_id only applies to source %q", f.Name, SourceHEY)
+			}
+		case SourceHEY:
+			if strings.TrimSpace(f.SourceURL) != "" {
+				return fmt.Errorf("feed %q: source_url does not apply to source %q (the hey CLI reads the calendars)", f.Name, SourceHEY)
+			}
+			if f.HEYCalendarID < 0 {
+				return fmt.Errorf("feed %q: hey_calendar_id cannot be negative", f.Name)
+			}
+		default:
+			return fmt.Errorf("feed %q: unknown source %q (want %q or %q)", f.Name, f.Source, SourceICS, SourceHEY)
 		}
 		switch f.Kind {
 		case KindICloud:

@@ -95,3 +95,61 @@ func TestValidateKinds(t *testing.T) {
 		}
 	}
 }
+
+func TestHEYFeed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	c := &Config{
+		Google: Google{Account: "a@gmail.com", ClientID: "cid"},
+		Feeds: []Feed{{Name: "hey", Kind: KindGoogle, Source: SourceHEY, HEYCalendarID: 42,
+			DestinationCalendar: "HEY (synced)"}},
+	}
+	if err := c.SaveTo(path); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	got, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	f := got.Feeds[0]
+	if f.Source != SourceHEY || f.HEYCalendarID != 42 {
+		t.Fatalf("source = %q, calendar = %d", f.Source, f.HEYCalendarID)
+	}
+	if f.SyncWindow.FutureDays != DefaultHEYFutureDays {
+		t.Fatalf("FutureDays = %d, want the bounded HEY default %d", f.SyncWindow.FutureDays, DefaultHEYFutureDays)
+	}
+}
+
+func TestDefaultSourceIsICS(t *testing.T) {
+	c := &Config{ICloud: ICloud{Username: "u"}, Feeds: []Feed{{Name: "f", SourceURL: "u", DestinationCalendar: "d"}}}
+	c.applyDefaults()
+	if c.Feeds[0].Source != SourceICS {
+		t.Fatalf("Source = %q, want %q", c.Feeds[0].Source, SourceICS)
+	}
+	if c.Feeds[0].SyncWindow.FutureDays != 0 {
+		t.Fatalf("an ICS feed's future window should stay unbounded, got %d", c.Feeds[0].SyncWindow.FutureDays)
+	}
+}
+
+func TestValidateSources(t *testing.T) {
+	icloud := ICloud{Username: "u"}
+	bad := map[string]*Config{
+		"unknown source": {ICloud: icloud, Feeds: []Feed{
+			{Name: "f", Kind: KindICloud, Source: "outlook", SourceURL: "u", DestinationCalendar: "d"}}},
+		"hey with url": {ICloud: icloud, Feeds: []Feed{
+			{Name: "f", Kind: KindICloud, Source: SourceHEY, SourceURL: "u", DestinationCalendar: "d"}}},
+		"ics with hey calendar": {ICloud: icloud, Feeds: []Feed{
+			{Name: "f", Kind: KindICloud, Source: SourceICS, SourceURL: "u", HEYCalendarID: 3, DestinationCalendar: "d"}}},
+		"ics without url": {ICloud: icloud, Feeds: []Feed{
+			{Name: "f", Kind: KindICloud, Source: SourceICS, DestinationCalendar: "d"}}},
+	}
+	for name, c := range bad {
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s: expected validation error, got nil", name)
+		}
+	}
+	ok := &Config{ICloud: icloud, Feeds: []Feed{
+		{Name: "h", Kind: KindICloud, Source: SourceHEY, DestinationCalendar: "d"}}}
+	if err := ok.Validate(); err != nil {
+		t.Errorf("hey feed without a url: expected valid, got %v", err)
+	}
+}

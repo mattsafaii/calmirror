@@ -62,7 +62,7 @@ type fakeFetcher struct {
 	err    error
 }
 
-func (f *fakeFetcher) Fetch(ctx context.Context, url string) (*feed.Parsed, error) {
+func (f *fakeFetcher) Fetch(ctx context.Context, fc config.Feed, start, end time.Time) (*feed.Parsed, error) {
 	return f.parsed, f.err
 }
 

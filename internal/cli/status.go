@@ -39,7 +39,7 @@ func cmdStatus(args []string) int {
 	}
 	fmt.Println()
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "FEED\tKIND\tEVENTS\tLAST SYNC\tLAST ERROR")
+	fmt.Fprintln(tw, "FEED\tSOURCE\tKIND\tEVENTS\tLAST SYNC\tLAST ERROR")
 	for _, f := range cfg.Feeds {
 		count, _ := st.CountLinks(f.Name)
 		state, ok, _ := st.GetFeed(f.Name)
@@ -54,7 +54,7 @@ func cmdStatus(args []string) int {
 				lastErr = state.LastError
 			}
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\n", f.Name, f.Kind, count, lastSync, lastErr)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", f.Name, sourceLabel(f), f.Kind, count, lastSync, lastErr)
 	}
 	if err := tw.Flush(); err != nil {
 		return fail("%v", err)
@@ -75,4 +75,13 @@ func humanizeAge(t time.Time) string {
 	default:
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
+}
+
+// sourceLabel names where a feed's events come from: "ics", "hey" (every
+// calendar switched on in HEY), or "hey:<calendar id>".
+func sourceLabel(f config.Feed) string {
+	if f.Source == config.SourceHEY && f.HEYCalendarID != 0 {
+		return fmt.Sprintf("hey:%d", f.HEYCalendarID)
+	}
+	return f.Source
 }
