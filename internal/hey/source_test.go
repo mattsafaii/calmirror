@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mattsafaii/calmirror/internal/feed"
+	"github.com/mattsafaii/heyday/internal/feed"
 )
 
 // weekRunner serves `hey event week <date>` from a map of date -> data JSON,
@@ -89,7 +89,7 @@ func TestFetchExpandsWeeksAndFilters(t *testing.T) {
 		t.Fatalf("events = %d (%v), want 2 standups + birthday; the other calendar is filtered out", len(byUID), keys(byUID))
 	}
 
-	mon := byUID["hey-500_2026-11-09@calmirror"]
+	mon := byUID["hey-500_2026-11-09@heyday"]
 	if mon.Summary != "Standup" || mon.URL != "https://zoom.us/j/1" {
 		t.Errorf("standup = %+v; want the join link as URL", mon)
 	}
@@ -99,17 +99,10 @@ func TestFetchExpandsWeeksAndFilters(t *testing.T) {
 	if mon.Start.Location().String() != "America/Los_Angeles" || mon.Start.Hour() != 9 {
 		t.Errorf("start = %v, want 09:00 in America/Los_Angeles", mon.Start)
 	}
-	if mon.Raw == nil {
-		t.Fatal("Raw VEVENT missing; the CalDAV destination writes from it")
-	}
 
-	bday := byUID["hey-700@calmirror"]
+	bday := byUID["hey-700@heyday"]
 	if !bday.AllDay || !bday.Start.Equal(day("2026-11-12")) || !bday.End.Equal(day("2026-11-14")) {
 		t.Errorf("all-day = %v..%v, want 2026-11-12..2026-11-14 (HEY's inclusive end made exclusive)", bday.Start, bday.End)
-	}
-	ics := feed.RenderICS(bday, nil)
-	if !strings.Contains(ics, "DTSTART;VALUE=DATE:20261112") || !strings.Contains(ics, "DTEND;VALUE=DATE:20261114") {
-		t.Errorf("all-day ICS dates wrong:\n%s", ics)
 	}
 }
 

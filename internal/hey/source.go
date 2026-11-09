@@ -8,12 +8,11 @@ import (
 	"strings"
 	"time"
 
-	ics "github.com/arran4/golang-ical"
-	"github.com/mattsafaii/calmirror/internal/feed"
+	"github.com/mattsafaii/heyday/internal/feed"
 )
 
 // Recording is the part of a HEY calendar event (`hey event week --json`) that
-// CalMirror mirrors. Field names follow the hey SDK's generated.Recording.
+// Heyday mirrors. Field names follow the hey SDK's generated.Recording.
 type Recording struct {
 	ID               int64     `json:"id"`
 	Type             string    `json:"type"`
@@ -46,7 +45,7 @@ type JoinLink struct {
 // Source reads HEY calendar events through the hey CLI, expanded into
 // individual occurrences. HEY's CLI exposes only a preset repeat kind (no end
 // date or count, custom schedules opaque), so rather than rebuild a lossy
-// RRULE, CalMirror mirrors each occurrence inside the sync window as its own
+// RRULE, Heyday mirrors each occurrence inside the sync window as its own
 // event. Single-day edits and cancellations then come through exactly.
 type Source struct {
 	Client *Client
@@ -137,12 +136,11 @@ func UID(r Recording) string {
 	if key == "" {
 		key = strconv.FormatInt(r.ID, 10)
 	}
-	return "hey-" + key + "@calmirror"
+	return "hey-" + key + "@heyday"
 }
 
-// ToEvent maps a HEY event to a normalized feed.Event, and builds the VEVENT
-// the CalDAV destination writes from it. The meeting link goes in URL, where
-// both destinations (and Granola) look first.
+// ToEvent maps a HEY event to a normalized feed.Event. The meeting join link
+// goes in URL, where the Google destination (and Granola) look first.
 func ToEvent(r Recording) feed.Event {
 	notes := r.Description
 	if notes == "" {
@@ -182,37 +180,7 @@ func ToEvent(r Recording) feed.Event {
 			ev.End = ev.Start
 		}
 	}
-	ev.Raw = vevent(ev)
 	return ev
-}
-
-// vevent renders the normalized event as an ICS VEVENT. Timed events are
-// written in UTC, so no VTIMEZONE is needed.
-func vevent(ev feed.Event) *ics.VEvent {
-	ve := ics.NewEvent(ev.UID)
-	ve.SetDtStampTime(ev.LastModified)
-	if !ev.LastModified.IsZero() {
-		ve.SetLastModifiedAt(ev.LastModified)
-	}
-	ve.SetSummary(ev.Summary)
-	if ev.Description != "" {
-		ve.SetDescription(ev.Description)
-	}
-	if ev.Location != "" {
-		ve.SetLocation(ev.Location)
-	}
-	if ev.URL != "" {
-		ve.SetURL(ev.URL)
-	}
-	ve.SetStatus(ics.ObjectStatusConfirmed)
-	if ev.AllDay {
-		ve.SetAllDayStartAt(ev.Start)
-		ve.SetAllDayEndAt(ev.End)
-	} else {
-		ve.SetStartAt(ev.Start.UTC())
-		ve.SetEndAt(ev.End.UTC())
-	}
-	return ve
 }
 
 func dateOnly(t time.Time) time.Time {

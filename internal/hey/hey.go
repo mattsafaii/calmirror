@@ -1,6 +1,6 @@
 // Package hey reads HEY calendars through the hey CLI (github.com/basecamp/hey-cli)
 // instead of an expiring ICS feed URL. The CLI owns sign-in and token refresh;
-// CalMirror only runs it and reads its JSON output, so no HEY credential is ever
+// Heyday only runs it and reads its JSON output, so no HEY credential is ever
 // stored here.
 package hey
 
@@ -16,7 +16,7 @@ import (
 	"strings"
 )
 
-// Exit statuses the hey CLI documents (`hey help exit-codes`) that CalMirror
+// Exit statuses the hey CLI documents (`hey help exit-codes`) that Heyday
 // acts on.
 const (
 	ExitAuth        = 3 // authentication is required or failed

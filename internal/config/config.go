@@ -1,7 +1,7 @@
-// Package config defines the on-disk CalMirror configuration: the destination
-// accounts (iCloud, Google) and the set of feeds to mirror. Secrets (the iCloud
-// app-specific password, the Google OAuth refresh token and client secret)
-// never live here — they belong in the macOS Keychain.
+// Package config defines Heyday's on-disk configuration: the connected Google
+// account and the feeds mirrored into it. Secrets (the Google OAuth refresh
+// token and client secret) never live here — they belong in the macOS
+// Keychain. HEY sign-in belongs to the hey CLI and is never seen by Heyday.
 package config
 
 import (
@@ -23,34 +23,22 @@ const DefaultSyncWindowPastDays = 30
 // needs a bounded window.
 const DefaultHEYFutureDays = 60
 
-// Destination kinds. A feed routes to exactly one.
-const (
-	KindICloud = "icloud"
-	KindGoogle = "google"
-)
+// appDir is the directory under the user config dir that holds config and state.
+const appDir = "heyday"
 
 // Source kinds: where a feed's events come from.
 const (
-	// SourceICS fetches an ICS feed URL (Basecamp, any calendar feed).
-	SourceICS = "ics"
 	// SourceHEY reads HEY calendars through the hey CLI, which owns sign-in.
+	// It is the default.
 	SourceHEY = "hey"
+	// SourceICS fetches an ICS feed URL (Basecamp, any calendar feed). Opt-in.
+	SourceICS = "ics"
 )
 
-// Config is the complete CalMirror configuration as stored on disk. The iCloud
-// and Google blocks are each optional; a block is required only when at least
-// one feed targets that kind.
+// Config is the complete Heyday configuration as stored on disk.
 type Config struct {
-	ICloud ICloud `json:"icloud"`
 	Google Google `json:"google"`
 	Feeds  []Feed `json:"feeds"`
-}
-
-// ICloud identifies the destination iCloud account. The matching app-specific
-// password is stored in the macOS Keychain, keyed by Username — never here.
-type ICloud struct {
-	// Username is the Apple ID / iCloud email used for CalDAV auth.
-	Username string `json:"username"`
 }
 
 // Google identifies the destination Google account and OAuth client. The OAuth
@@ -62,52 +50,58 @@ type Google struct {
 	ClientID string `json:"client_id,omitempty"`
 }
 
-// Feed describes one mirror: a source (an ICS URL, or HEY calendars via the hey
-// CLI) copied into a dedicated calendar on the chosen destination. Name is the
-// stable identifier used as the local-state key and in CLI output. Source
-// selects where events come from (ics/hey); an empty Source is ics, as every
-// feed was before HEY support. Kind selects the destination backend
-// (icloud/google); an empty Kind defaults to icloud for Phase 1 backward
-// compatibility. Mutable
-// per-run state (last-sync time, last error, event counts) lives in the SQLite
-// store, not in config.
+// Feed describes one mirror: a source copied into a dedicated, Heyday-owned
+// Google calendar. Name is the stable identifier used as the local-state key
+// and in CLI output. Source selects where events come from; an empty Source is
+// hey. Mutable per-run state (last-sync time, last error, event counts) lives in
+// the SQLite store, not in config.
 type Feed struct {
-	Name      string `json:"name"`
-	Kind      string `json:"kind"`
-	Source    string `json:"source,omitempty"`
-	SourceURL string `json:"source_url,omitempty"`
+	Name   string `json:"name"`
+	Source string `json:"source,omitempty"`
 	// HEYCalendarID narrows a HEY feed to one calendar (from `hey calendar
 	// list`). 0 means every calendar switched on in HEY.
-	HEYCalendarID       int64      `json:"hey_calendar_id,omitempty"`
+	HEYCalendarID int64 `json:"hey_calendar_id,omitempty"`
+	// SourceURL is the feed URL of an ICS feed.
+	SourceURL           string     `json:"source_url,omitempty"`
 	DestinationCalendar string     `json:"destination_calendar"`
 	SyncWindow          SyncWindow `json:"sync_window"`
 }
 
 // SyncWindow bounds which events are mirrored, relative to now. PastDays looks
-// backward; FutureDays of 0 means no future bound (mirror everything ahead).
+// backward; FutureDays of 0 means no future bound (ICS feeds only — HEY feeds
+// default to DefaultHEYFutureDays).
 type SyncWindow struct {
 	PastDays   int `json:"past_days"`
 	FutureDays int `json:"future_days"`
 }
 
-// Path returns the default config file location:
-// $HOME/Library/Application Support/calmirror/config.json on macOS.
-func Path() (string, error) {
+// Dir returns the directory holding Heyday's config and state:
+// $HOME/Library/Application Support/heyday on macOS.
+func Dir() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "calmirror", "config.json"), nil
+	return filepath.Join(dir, appDir), nil
+}
+
+// Path returns the default config file location.
+func Path() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "config.json"), nil
 }
 
 // StateDBPath returns the default SQLite state database location, alongside the
 // config file.
 func StateDBPath() (string, error) {
-	dir, err := os.UserConfigDir()
+	dir, err := Dir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "calmirror", "state.db"), nil
+	return filepath.Join(dir, "state.db"), nil
 }
 
 // Load reads and validates the config at the default Path. A missing file
@@ -142,7 +136,7 @@ func LoadFrom(path string) (*Config, error) {
 
 // Save writes the config to the default Path, creating the parent directory and
 // validating before any bytes are written. The file is written 0600 since it
-// names the iCloud account.
+// names the Google account.
 func (c *Config) Save() error {
 	path, err := Path()
 	if err != nil {
@@ -168,7 +162,7 @@ func (c *Config) SaveTo(path string) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-// Feed returns the feed with the given name, or false if none matches.
+// FeedByName returns the feed with the given name, or false if none matches.
 func (c *Config) FeedByName(name string) (Feed, bool) {
 	for _, f := range c.Feeds {
 		if f.Name == name {
@@ -180,29 +174,24 @@ func (c *Config) FeedByName(name string) (Feed, bool) {
 
 func (c *Config) applyDefaults() {
 	for i := range c.Feeds {
-		if c.Feeds[i].SyncWindow.PastDays == 0 {
-			c.Feeds[i].SyncWindow.PastDays = DefaultSyncWindowPastDays
+		f := &c.Feeds[i]
+		if f.SyncWindow.PastDays == 0 {
+			f.SyncWindow.PastDays = DefaultSyncWindowPastDays
 		}
-		// An empty kind means a Phase 1 config that predates Google support;
-		// those feeds are iCloud.
-		if strings.TrimSpace(c.Feeds[i].Kind) == "" {
-			c.Feeds[i].Kind = KindICloud
+		if strings.TrimSpace(f.Source) == "" {
+			f.Source = SourceHEY
 		}
-		if strings.TrimSpace(c.Feeds[i].Source) == "" {
-			c.Feeds[i].Source = SourceICS
-		}
-		if c.Feeds[i].Source == SourceHEY && c.Feeds[i].SyncWindow.FutureDays == 0 {
-			c.Feeds[i].SyncWindow.FutureDays = DefaultHEYFutureDays
+		if f.Source == SourceHEY && f.SyncWindow.FutureDays == 0 {
+			f.SyncWindow.FutureDays = DefaultHEYFutureDays
 		}
 	}
 }
 
 // Validate checks structural invariants: the required fields on each feed,
-// unique feed names, a valid destination kind per feed, and the destination
-// account for each kind actually in use.
+// unique feed names, a valid source per feed, and a connected Google account
+// whenever there is a feed to write.
 func (c *Config) Validate() error {
 	seen := make(map[string]bool, len(c.Feeds))
-	var usesICloud, usesGoogle bool
 	for i, f := range c.Feeds {
 		switch {
 		case strings.TrimSpace(f.Name) == "":
@@ -215,31 +204,22 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("feed %q: sync_window.future_days cannot be negative", f.Name)
 		}
 		switch f.Source {
-		case SourceICS, "": // "" before applyDefaults
-			if strings.TrimSpace(f.SourceURL) == "" {
-				return fmt.Errorf("feed %q: source_url is required", f.Name)
-			}
-			if f.HEYCalendarID != 0 {
-				return fmt.Errorf("feed %q: hey_calendar_id only applies to source %q", f.Name, SourceHEY)
-			}
-		case SourceHEY:
+		case SourceHEY, "": // "" before applyDefaults
 			if strings.TrimSpace(f.SourceURL) != "" {
 				return fmt.Errorf("feed %q: source_url does not apply to source %q (the hey CLI reads the calendars)", f.Name, SourceHEY)
 			}
 			if f.HEYCalendarID < 0 {
 				return fmt.Errorf("feed %q: hey_calendar_id cannot be negative", f.Name)
 			}
+		case SourceICS:
+			if strings.TrimSpace(f.SourceURL) == "" {
+				return fmt.Errorf("feed %q: source_url is required for source %q", f.Name, SourceICS)
+			}
+			if f.HEYCalendarID != 0 {
+				return fmt.Errorf("feed %q: hey_calendar_id only applies to source %q", f.Name, SourceHEY)
+			}
 		default:
-			return fmt.Errorf("feed %q: unknown source %q (want %q or %q)", f.Name, f.Source, SourceICS, SourceHEY)
-		}
-		switch f.Kind {
-		case KindICloud:
-			usesICloud = true
-		case KindGoogle:
-			usesGoogle = true
-		default:
-			return fmt.Errorf("feed %q: unknown destination kind %q (want %q or %q)",
-				f.Name, f.Kind, KindICloud, KindGoogle)
+			return fmt.Errorf("feed %q: unknown source %q (want %q or %q)", f.Name, f.Source, SourceHEY, SourceICS)
 		}
 		if seen[f.Name] {
 			return fmt.Errorf("duplicate feed name %q", f.Name)
@@ -247,17 +227,12 @@ func (c *Config) Validate() error {
 		seen[f.Name] = true
 	}
 
-	// A destination account is required only for the kinds actually in use, so
-	// a Google-only setup needs no iCloud account and vice versa.
-	if usesICloud && strings.TrimSpace(c.ICloud.Username) == "" {
-		return errors.New("icloud.username is required for iCloud feeds")
-	}
-	if usesGoogle {
+	if len(c.Feeds) > 0 {
 		if strings.TrimSpace(c.Google.Account) == "" {
-			return errors.New("google.account is required for Google feeds")
+			return errors.New("google.account is required; run `heyday setup` to connect Google")
 		}
 		if strings.TrimSpace(c.Google.ClientID) == "" {
-			return errors.New("google.client_id is required for Google feeds")
+			return errors.New("google.client_id is required; run `heyday setup` to connect Google")
 		}
 	}
 	return nil

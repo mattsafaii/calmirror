@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mattsafaii/calmirror/internal/hey"
-	"github.com/mattsafaii/calmirror/internal/notify"
+	"github.com/mattsafaii/heyday/internal/hey"
+	"github.com/mattsafaii/heyday/internal/notify"
 )
 
 // heyWatchEvents are the hey watch change kinds that warrant a mirror pass:
@@ -38,15 +38,15 @@ const (
 
 // signInStopMessage is what the user sees when watch stops on a sign-in
 // failure. watch exits cleanly so launchd does not relaunch it (the agent only
-// restarts on a crash); it tries again at the next login, or after `calmirror
+// restarts on a crash); it tries again at the next login, or after `heyday
 // install`.
-const signInStopMessage = "HEY sign-in failed, so CalMirror stopped watching HEY. Run `hey auth login`, then `calmirror install` to start watching again."
+const signInStopMessage = "HEY sign-in failed, so Heyday stopped watching HEY. Run `hey auth login`, then `heyday install` to start watching again."
 
 func cmdWatch(args []string) int {
 	fset := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fset.Usage = func() {
-		fmt.Fprintf(fset.Output(), "Usage: calmirror watch\n\n")
-		fmt.Fprintf(fset.Output(), "Follow HEY calendar changes via the hey CLI and run `calmirror sync`\n")
+		fmt.Fprintf(fset.Output(), "Usage: heyday watch\n\n")
+		fmt.Fprintf(fset.Output(), "Follow HEY calendar changes via the hey CLI and run `heyday sync`\n")
 		fmt.Fprintf(fset.Output(), "whenever a recording is added, updated, or deleted — near-instant mirrors\n")
 		fmt.Fprintf(fset.Output(), "on top of the scheduled `install` job, which stays in place as the fallback.\n\n")
 		fmt.Fprintf(fset.Output(), "Network and server failures are retried with backoff (%s to %s).\n", watchBackoffMin, watchBackoffMax)
@@ -61,7 +61,7 @@ func cmdWatch(args []string) int {
 	if err != nil {
 		// Permanent until hey is installed: exit cleanly so launchd does not
 		// relaunch the agent over and over.
-		fmt.Fprintf(os.Stderr, "calmirror: %v; not watching.\n", err)
+		fmt.Fprintf(os.Stderr, "heyday: %v; not watching.\n", err)
 		return 0
 	}
 	bin, err := os.Executable()
@@ -119,9 +119,9 @@ func (w *watcher) loop(ctx context.Context) int {
 			exitCode = exitErr.ExitCode()
 		}
 		if hey.SignInFailure(exitCode, tail.String()) {
-			fmt.Fprintf(w.log, "calmirror: hey watch exited (status %d): %s\n", exitCode, signInStopMessage)
+			fmt.Fprintf(w.log, "heyday: hey watch exited (status %d): %s\n", exitCode, signInStopMessage)
 			if w.notifier != nil {
-				w.notifier.Notify("CalMirror: HEY sign-in needed", signInStopMessage)
+				w.notifier.Notify("Heyday: HEY sign-in needed", signInStopMessage)
 			}
 			return 0
 		}
@@ -133,7 +133,7 @@ func (w *watcher) loop(ctx context.Context) int {
 		if err != nil {
 			reason = err.Error()
 		}
-		fmt.Fprintf(w.log, "calmirror: hey watch %s; retrying in %s\n", reason, backoff)
+		fmt.Fprintf(w.log, "heyday: hey watch %s; retrying in %s\n", reason, backoff)
 		if !w.sleep(ctx, backoff) {
 			return 0
 		}
@@ -142,7 +142,7 @@ func (w *watcher) loop(ctx context.Context) int {
 }
 
 // runHeyWatch runs one `hey watch` until it exits or ctx is cancelled, copying
-// its output to the terminal/log and to tail. hey runs `calmirror sync` itself
+// its output to the terminal/log and to tail. hey runs `heyday sync` itself
 // on each calendar change.
 func runHeyWatch(ctx context.Context, heyBin, bin string, tail io.Writer) error {
 	cmd := exec.CommandContext(ctx, heyBin, "watch",

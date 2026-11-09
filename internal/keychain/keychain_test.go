@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// testAccount is a throwaway account under the calmirror service; it never
-// collides with a real iCloud username and is deleted on cleanup.
-const testAccount = "calmirror-keychain-selftest@example.invalid"
+// testAccount is a throwaway account under the heyday service; it never
+// collides with a real secret and is deleted on cleanup.
+const testAccount = "heyday-keychain-selftest@example.invalid"
 
 func TestRoundTrip(t *testing.T) {
 	if _, err := exec.LookPath("security"); err != nil {

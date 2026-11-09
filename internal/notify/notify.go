@@ -1,5 +1,5 @@
 // Package notify posts macOS user notifications via osascript, so a persistent
-// feed failure is visible even when CalMirror runs unattended on a schedule.
+// feed failure is visible even when Heyday runs unattended on a schedule.
 package notify
 
 import (

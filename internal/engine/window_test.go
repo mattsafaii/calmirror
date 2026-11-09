@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mattsafaii/calmirror/internal/config"
-	"github.com/mattsafaii/calmirror/internal/feed"
+	"github.com/mattsafaii/heyday/internal/config"
+	"github.com/mattsafaii/heyday/internal/feed"
 )
 
 func TestWindow(t *testing.T) {

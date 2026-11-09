@@ -10,15 +10,15 @@ import (
 	"time"
 
 	ics "github.com/arran4/golang-ical"
-	"github.com/mattsafaii/calmirror/internal/feed"
+	"github.com/mattsafaii/heyday/internal/feed"
 	"google.golang.org/api/calendar/v3"
 	"google.golang.org/api/googleapi"
 )
 
-// calendarMarker tags the dedicated calendars CalMirror creates so EnsureCalendar
+// calendarMarker tags the dedicated calendars Heyday creates so EnsureCalendar
 // only ever adopts its own calendars — never a user's hand-made calendar that
 // happens to share the display name. It also reads as a warning in the Google UI.
-const calendarMarker = "Managed by CalMirror — events here are mirrored from a source feed and will be overwritten."
+const calendarMarker = "Managed by Heyday — events here are mirrored from HEY and will be overwritten."
 
 // Destination implements engine.Destination against Google Calendar. The calRef
 // it returns from EnsureCalendar is a Google calendar id; the per-event ref is a
@@ -32,9 +32,9 @@ func NewDestination(svc *calendar.Service) *Destination {
 	return &Destination{svc: svc}
 }
 
-// EnsureCalendar finds the dedicated, CalMirror-owned mirror calendar named
+// EnsureCalendar finds the dedicated, Heyday-owned mirror calendar named
 // displayName, creating it if absent, and returns its id. It matches only
-// calendars CalMirror itself created (owner access + our marker description), so
+// calendars Heyday itself created (owner access + our marker description), so
 // it never writes into a user's existing calendar of the same name.
 func (d *Destination) EnsureCalendar(ctx context.Context, displayName string) (string, error) {
 	call := d.svc.CalendarList.List().ShowHidden(true)
@@ -65,7 +65,7 @@ func (d *Destination) EnsureCalendar(ctx context.Context, displayName string) (s
 }
 
 // CreateEvent inserts a native event and returns its id and ETag.
-func (d *Destination) CreateEvent(ctx context.Context, calRef string, ev feed.Event, tz []*ics.VTimezone) (string, string, error) {
+func (d *Destination) CreateEvent(ctx context.Context, calRef string, ev feed.Event) (string, string, error) {
 	created, err := d.svc.Events.Insert(calRef, toGoogleEvent(ev)).Context(ctx).Do()
 	if err != nil {
 		return "", "", err
@@ -74,7 +74,7 @@ func (d *Destination) CreateEvent(ctx context.Context, calRef string, ev feed.Ev
 }
 
 // UpdateEvent overwrites the event at ref and returns the new ETag.
-func (d *Destination) UpdateEvent(ctx context.Context, calRef, ref string, ev feed.Event, tz []*ics.VTimezone) (string, error) {
+func (d *Destination) UpdateEvent(ctx context.Context, calRef, ref string, ev feed.Event) (string, error) {
 	updated, err := d.svc.Events.Update(calRef, ref, toGoogleEvent(ev)).Context(ctx).Do()
 	if err != nil {
 		return "", err

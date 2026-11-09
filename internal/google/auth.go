@@ -1,7 +1,7 @@
-// Package google is CalMirror's Google Calendar destination: the installed-app
+// Package google is Heyday's Google Calendar destination: the installed-app
 // OAuth flow that connects an account, the Keychain-backed credential storage,
 // and the Destination implementation that mirrors events into a dedicated,
-// CalMirror-owned Google calendar.
+// Heyday-owned Google calendar.
 //
 // Secrets never touch config or SQLite. The OAuth refresh token and the client
 // secret live in the macOS Keychain; only the account email and the (public)
@@ -18,15 +18,14 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/mattsafaii/calmirror/internal/keychain"
+	"github.com/mattsafaii/heyday/internal/keychain"
 	"golang.org/x/oauth2"
 	googleoauth "golang.org/x/oauth2/google"
 	"google.golang.org/api/calendar/v3"
 	"google.golang.org/api/option"
 )
 
-// Keychain account prefixes namespace Google secrets so they never collide with
-// the iCloud app-specific password (which is keyed by the bare iCloud username).
+// Keychain account prefixes name the two Google secrets stored per account.
 const (
 	keyRefreshPrefix = "google-refresh:"
 	keySecretPrefix  = "google-secret:"
@@ -82,7 +81,7 @@ func Connect(ctx context.Context, clientID, clientSecret string) (account, refre
 			resultCh <- result{err: fmt.Errorf("google: oauth state mismatch")}
 			return
 		}
-		fmt.Fprintln(w, "CalMirror is connected. You can close this tab and return to the terminal.")
+		fmt.Fprintln(w, "Heyday is connected. You can close this tab and return to the terminal.")
 		resultCh <- result{code: q.Get("code")}
 	})
 	srv := &http.Server{Handler: mux}
@@ -90,7 +89,7 @@ func Connect(ctx context.Context, clientID, clientSecret string) (account, refre
 	defer srv.Close()
 
 	authURL := cfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce)
-	fmt.Println("Opening your browser to authorize CalMirror's Google access.")
+	fmt.Println("Opening your browser to authorize Heyday's Google access.")
 	fmt.Println("If it does not open, visit this URL:")
 	fmt.Println("  " + authURL)
 	_ = openBrowser(authURL)

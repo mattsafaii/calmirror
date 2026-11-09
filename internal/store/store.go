@@ -1,5 +1,5 @@
-// Package store is CalMirror's local state: the mapping from a source ICS UID
-// to the CalDAV event it was mirrored to, plus per-feed sync state. The config
+// Package store is Heyday's local state: the mapping from a source ICS UID
+// to the Google event it was mirrored to, plus per-feed sync state. The config
 // file owns feed *definitions* (source URL, destination calendar, sync window);
 // this store owns mutable runtime state. Secrets never live here — they belong
 // in the macOS Keychain.
@@ -47,7 +47,7 @@ type FeedState struct {
 	LastErrorAt             time.Time
 }
 
-// EventLink maps one source event (by ICS UID) to the CalDAV event it was
+// EventLink maps one source event (by UID) to the Google event it was
 // mirrored to, with the data needed for change detection.
 type EventLink struct {
 	FeedName    string
@@ -122,7 +122,7 @@ func (s *Store) GetFeed(name string) (FeedState, bool, error) {
 	return fs, true, nil
 }
 
-// SetDestinationCalendar records the resolved CalDAV calendar href for a feed,
+// SetDestinationCalendar records the resolved Google calendar id for a feed,
 // creating the feed row if needed.
 func (s *Store) SetDestinationCalendar(name, href string) error {
 	if err := s.EnsureFeed(name); err != nil {

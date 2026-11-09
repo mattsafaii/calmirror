@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mattsafaii/calmirror/internal/config"
-	"github.com/mattsafaii/calmirror/internal/feed"
-	"github.com/mattsafaii/calmirror/internal/hey"
+	"github.com/mattsafaii/heyday/internal/config"
+	"github.com/mattsafaii/heyday/internal/feed"
+	"github.com/mattsafaii/heyday/internal/hey"
 )
 
 // sourceRouter is the engine's Fetcher: it reads each feed from its configured

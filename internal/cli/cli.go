@@ -1,4 +1,4 @@
-// Package cli routes the calmirror command-line surface to its subcommands.
+// Package cli routes the heyday command-line surface to its subcommands.
 package cli
 
 import (
@@ -6,16 +6,17 @@ import (
 	"os"
 )
 
-const usage = `calmirror mirrors ICS calendar feeds into iCloud or Google Calendar
-as full-fidelity native events.
+const usage = `heyday mirrors your HEY calendar into Google Calendar as native events,
+with the meeting link, notes and location intact, so tools that read only
+Google or Outlook calendars (Granola, Zoom) see your HEY meetings.
 
 Usage:
-  calmirror <command> [arguments]
+  heyday <command> [arguments]
 
 Commands:
-  setup       Add a feed routed to a destination (iCloud or Google) and store its secret
+  setup       Connect Google and add a feed (a HEY calendar, or an ICS feed URL)
   sync        Run one sync pass across all configured feeds
-  status      Show per-feed destination kind, last-sync time, event counts, and last error
+  status      Show each feed's source, Google calendar, last sync, event count and last error
   watch       Sync whenever HEY calendars change (requires the hey CLI)
   install     Register launchd login-items: scheduled syncs, plus the HEY watch agent
   uninstall   Remove the launchd login-items
@@ -47,13 +48,13 @@ func Run(args []string) int {
 		fmt.Print(usage)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "calmirror: unknown command %q\n\n%s", cmd, usage)
+		fmt.Fprintf(os.Stderr, "heyday: unknown command %q\n\n%s", cmd, usage)
 		return 2
 	}
 }
 
 // fail prints a message to stderr and returns exit code 1.
 func fail(format string, args ...any) int {
-	fmt.Fprintf(os.Stderr, "calmirror: "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "heyday: "+format+"\n", args...)
 	return 1
 }

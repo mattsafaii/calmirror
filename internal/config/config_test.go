@@ -5,14 +5,16 @@ import (
 	"testing"
 )
 
+var google = Google{Account: "matt@gmail.com", ClientID: "cid"}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	want := &Config{
-		ICloud: ICloud{Username: "matt@icloud.com"},
+		Google: google,
 		Feeds: []Feed{{
 			Name:                "hey",
-			SourceURL:           "https://hey.com/feed.ics",
-			DestinationCalendar: "HEY (synced)",
+			HEYCalendarID:       42,
+			DestinationCalendar: "HEY (Heyday)",
 			SyncWindow:          SyncWindow{PastDays: 14, FutureDays: 90},
 		}},
 	}
@@ -23,86 +25,16 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFrom: %v", err)
 	}
-	if len(got.Feeds) != 1 || got.Feeds[0] != want.Feeds[0] || got.ICloud != want.ICloud {
+	if len(got.Feeds) != 1 || got.Feeds[0] != want.Feeds[0] || got.Google != want.Google {
 		t.Fatalf("round trip mismatch:\n got %+v\nwant %+v", got, want)
 	}
 }
 
-func TestDefaultSyncWindow(t *testing.T) {
+// A feed with no source is a HEY feed, with a bounded future window so
+// repeating events can be expanded.
+func TestDefaultsToHEY(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	c := &Config{
-		ICloud: ICloud{Username: "u@icloud.com"},
-		Feeds:  []Feed{{Name: "f", SourceURL: "https://x/y.ics", DestinationCalendar: "F"}},
-	}
-	if err := c.SaveTo(path); err != nil {
-		t.Fatalf("SaveTo: %v", err)
-	}
-	got, err := LoadFrom(path)
-	if err != nil {
-		t.Fatalf("LoadFrom: %v", err)
-	}
-	if got.Feeds[0].SyncWindow.PastDays != DefaultSyncWindowPastDays {
-		t.Fatalf("PastDays = %d, want default %d", got.Feeds[0].SyncWindow.PastDays, DefaultSyncWindowPastDays)
-	}
-}
-
-func TestValidate(t *testing.T) {
-	cases := map[string]*Config{
-		"no username":   {Feeds: []Feed{{Name: "f", SourceURL: "u", DestinationCalendar: "d"}}},
-		"no source url": {ICloud: ICloud{Username: "u"}, Feeds: []Feed{{Name: "f", DestinationCalendar: "d"}}},
-		"no dest cal":   {ICloud: ICloud{Username: "u"}, Feeds: []Feed{{Name: "f", SourceURL: "u"}}},
-		"dup names": {ICloud: ICloud{Username: "u"}, Feeds: []Feed{
-			{Name: "f", SourceURL: "u", DestinationCalendar: "d"},
-			{Name: "f", SourceURL: "u2", DestinationCalendar: "d2"},
-		}},
-	}
-	for name, c := range cases {
-		if err := c.Validate(); err == nil {
-			t.Errorf("%s: expected validation error, got nil", name)
-		}
-	}
-}
-
-func TestValidateKinds(t *testing.T) {
-	bad := map[string]*Config{
-		"unknown kind": {ICloud: ICloud{Username: "u"}, Feeds: []Feed{
-			{Name: "f", Kind: "outlook", SourceURL: "u", DestinationCalendar: "d"}}},
-		"google feed without account": {Feeds: []Feed{
-			{Name: "f", Kind: KindGoogle, SourceURL: "u", DestinationCalendar: "d"}}},
-		"google feed without client id": {Google: Google{Account: "a@gmail.com"}, Feeds: []Feed{
-			{Name: "f", Kind: KindGoogle, SourceURL: "u", DestinationCalendar: "d"}}},
-	}
-	for name, c := range bad {
-		if err := c.Validate(); err == nil {
-			t.Errorf("%s: expected validation error, got nil", name)
-		}
-	}
-
-	// A Google-only config needs no iCloud account; an iCloud-only config needs
-	// no Google block. Both should validate.
-	ok := map[string]*Config{
-		"google only": {Google: Google{Account: "a@gmail.com", ClientID: "cid"}, Feeds: []Feed{
-			{Name: "g", Kind: KindGoogle, SourceURL: "u", DestinationCalendar: "d"}}},
-		"icloud only": {ICloud: ICloud{Username: "u"}, Feeds: []Feed{
-			{Name: "i", Kind: KindICloud, SourceURL: "u", DestinationCalendar: "d"}}},
-		"mixed": {ICloud: ICloud{Username: "u"}, Google: Google{Account: "a@gmail.com", ClientID: "cid"}, Feeds: []Feed{
-			{Name: "i", Kind: KindICloud, SourceURL: "u", DestinationCalendar: "d"},
-			{Name: "g", Kind: KindGoogle, SourceURL: "u", DestinationCalendar: "d"}}},
-	}
-	for name, c := range ok {
-		if err := c.Validate(); err != nil {
-			t.Errorf("%s: expected valid, got %v", name, err)
-		}
-	}
-}
-
-func TestHEYFeed(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	c := &Config{
-		Google: Google{Account: "a@gmail.com", ClientID: "cid"},
-		Feeds: []Feed{{Name: "hey", Kind: KindGoogle, Source: SourceHEY, HEYCalendarID: 42,
-			DestinationCalendar: "HEY (synced)"}},
-	}
+	c := &Config{Google: google, Feeds: []Feed{{Name: "hey", DestinationCalendar: "HEY"}}}
 	if err := c.SaveTo(path); err != nil {
 		t.Fatalf("SaveTo: %v", err)
 	}
@@ -111,45 +43,56 @@ func TestHEYFeed(t *testing.T) {
 		t.Fatalf("LoadFrom: %v", err)
 	}
 	f := got.Feeds[0]
-	if f.Source != SourceHEY || f.HEYCalendarID != 42 {
-		t.Fatalf("source = %q, calendar = %d", f.Source, f.HEYCalendarID)
+	if f.Source != SourceHEY {
+		t.Fatalf("Source = %q, want %q", f.Source, SourceHEY)
 	}
-	if f.SyncWindow.FutureDays != DefaultHEYFutureDays {
-		t.Fatalf("FutureDays = %d, want the bounded HEY default %d", f.SyncWindow.FutureDays, DefaultHEYFutureDays)
+	if f.SyncWindow.PastDays != DefaultSyncWindowPastDays || f.SyncWindow.FutureDays != DefaultHEYFutureDays {
+		t.Fatalf("window = %+v, want %d past / %d future", f.SyncWindow, DefaultSyncWindowPastDays, DefaultHEYFutureDays)
 	}
 }
 
-func TestDefaultSourceIsICS(t *testing.T) {
-	c := &Config{ICloud: ICloud{Username: "u"}, Feeds: []Feed{{Name: "f", SourceURL: "u", DestinationCalendar: "d"}}}
+// An ICS feed is opt-in and keeps an unbounded future by default.
+func TestICSFeedOptIn(t *testing.T) {
+	c := &Config{Google: google, Feeds: []Feed{{Name: "bc", Source: SourceICS, SourceURL: "https://x/y.ics", DestinationCalendar: "BC"}}}
 	c.applyDefaults()
-	if c.Feeds[0].Source != SourceICS {
-		t.Fatalf("Source = %q, want %q", c.Feeds[0].Source, SourceICS)
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 	if c.Feeds[0].SyncWindow.FutureDays != 0 {
 		t.Fatalf("an ICS feed's future window should stay unbounded, got %d", c.Feeds[0].SyncWindow.FutureDays)
 	}
 }
 
-func TestValidateSources(t *testing.T) {
-	icloud := ICloud{Username: "u"}
+func TestValidate(t *testing.T) {
 	bad := map[string]*Config{
-		"unknown source": {ICloud: icloud, Feeds: []Feed{
-			{Name: "f", Kind: KindICloud, Source: "outlook", SourceURL: "u", DestinationCalendar: "d"}}},
-		"hey with url": {ICloud: icloud, Feeds: []Feed{
-			{Name: "f", Kind: KindICloud, Source: SourceHEY, SourceURL: "u", DestinationCalendar: "d"}}},
-		"ics with hey calendar": {ICloud: icloud, Feeds: []Feed{
-			{Name: "f", Kind: KindICloud, Source: SourceICS, SourceURL: "u", HEYCalendarID: 3, DestinationCalendar: "d"}}},
-		"ics without url": {ICloud: icloud, Feeds: []Feed{
-			{Name: "f", Kind: KindICloud, Source: SourceICS, DestinationCalendar: "d"}}},
+		"no google account": {Google: Google{ClientID: "cid"}, Feeds: []Feed{{Name: "f", DestinationCalendar: "d"}}},
+		"no client id":      {Google: Google{Account: "a@gmail.com"}, Feeds: []Feed{{Name: "f", DestinationCalendar: "d"}}},
+		"no dest cal":       {Google: google, Feeds: []Feed{{Name: "f"}}},
+		"no name":           {Google: google, Feeds: []Feed{{DestinationCalendar: "d"}}},
+		"dup names": {Google: google, Feeds: []Feed{
+			{Name: "f", DestinationCalendar: "d"},
+			{Name: "f", DestinationCalendar: "d2"},
+		}},
+		"unknown source":        {Google: google, Feeds: []Feed{{Name: "f", Source: "outlook", DestinationCalendar: "d"}}},
+		"hey with url":          {Google: google, Feeds: []Feed{{Name: "f", Source: SourceHEY, SourceURL: "u", DestinationCalendar: "d"}}},
+		"ics without url":       {Google: google, Feeds: []Feed{{Name: "f", Source: SourceICS, DestinationCalendar: "d"}}},
+		"ics with hey calendar": {Google: google, Feeds: []Feed{{Name: "f", Source: SourceICS, SourceURL: "u", HEYCalendarID: 3, DestinationCalendar: "d"}}},
+		"negative calendar":     {Google: google, Feeds: []Feed{{Name: "f", HEYCalendarID: -1, DestinationCalendar: "d"}}},
 	}
 	for name, c := range bad {
 		if err := c.Validate(); err == nil {
 			t.Errorf("%s: expected validation error, got nil", name)
 		}
 	}
-	ok := &Config{ICloud: icloud, Feeds: []Feed{
-		{Name: "h", Kind: KindICloud, Source: SourceHEY, DestinationCalendar: "d"}}}
-	if err := ok.Validate(); err != nil {
-		t.Errorf("hey feed without a url: expected valid, got %v", err)
+
+	ok := map[string]*Config{
+		"no feeds yet":   {},
+		"hey feed":       {Google: google, Feeds: []Feed{{Name: "h", DestinationCalendar: "d"}}},
+		"hey + ics feed": {Google: google, Feeds: []Feed{{Name: "h", DestinationCalendar: "d"}, {Name: "i", Source: SourceICS, SourceURL: "u", DestinationCalendar: "d2"}}},
+	}
+	for name, c := range ok {
+		if err := c.Validate(); err != nil {
+			t.Errorf("%s: expected valid, got %v", name, err)
+		}
 	}
 }
