@@ -1,5 +1,6 @@
-// Package launchd installs and removes CalMirror's own launchd login-item, so
-// `calmirror sync` runs on a schedule after login with no manual plist editing.
+// Package launchd installs and removes CalMirror's launchd login-items: the
+// scheduled `calmirror sync` job and the optional HEY watch agent, so both run
+// after login with no manual plist editing.
 package launchd
 
 import (
@@ -9,66 +10,66 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
-// Label is the launchd job label and the plist file's base name.
-const Label = "com.calmirror.sync"
+const (
+	// Label is the launchd job label (and plist base name) of the scheduled sync.
+	Label = "com.calmirror.sync"
+	// WatchLabel is the launchd job label of the HEY watch agent.
+	WatchLabel = "com.calmirror.watch"
+)
 
-// PlistPath returns the per-user LaunchAgents path for the CalMirror job.
-func PlistPath() (string, error) {
+// PlistPath returns the per-user LaunchAgents path for a CalMirror job label.
+func PlistPath(label string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "Library", "LaunchAgents", Label+".plist"), nil
+	return filepath.Join(home, "Library", "LaunchAgents", label+".plist"), nil
 }
 
-// Install writes the launchd plist and (re)loads it. The job runs `calmirror
-// sync` at load (login) and every interval thereafter. It logs stdout/stderr to
+// Install writes the sync job's plist and (re)loads it. The job runs
+// `calmirror sync` at load (login) and every interval thereafter. It logs to
 // logPath. binPath is the calmirror executable to invoke.
 func Install(binPath string, interval time.Duration, logPath string) error {
-	plistPath, err := PlistPath()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
-		return err
-	}
-	content := plistContent(binPath, interval, logPath)
-	if err := os.WriteFile(plistPath, []byte(content), 0o644); err != nil {
-		return err
-	}
-
-	target := domainTarget()
-	// Replace any prior instance, then load and start once now.
-	_ = run("launchctl", "bootout", target+"/"+Label) // ignore "not loaded"
-	if err := run("launchctl", "bootstrap", target, plistPath); err != nil {
-		return fmt.Errorf("launchctl bootstrap: %w", err)
-	}
-	if err := run("launchctl", "enable", target+"/"+Label); err != nil {
-		return fmt.Errorf("launchctl enable: %w", err)
-	}
-	return nil
+	return installPlist(Label,
+		renderPlist(Label, []string{binPath, "sync"}, int(interval.Seconds()), false, logPath))
 }
 
-// Uninstall unloads the job and removes its plist. Removing an absent job is
-// not an error.
+// InstallWatch writes the watch agent's plist and (re)loads it. The job runs
+// `calmirror watch` at load and launchd restarts it whenever it exits. It logs
+// to logPath. binPath is the calmirror executable to invoke.
+func InstallWatch(binPath string, logPath string) error {
+	return installPlist(WatchLabel,
+		renderPlist(WatchLabel, []string{binPath, "watch"}, 0, true, logPath))
+}
+
+// Uninstall unloads the sync job and removes its plist. Removing an absent job
+// is not an error.
 func Uninstall() error {
-	plistPath, err := PlistPath()
-	if err != nil {
-		return err
-	}
-	_ = run("launchctl", "bootout", domainTarget()+"/"+Label)
-	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
+	return uninstallLabel(Label)
+}
+
+// UninstallWatch unloads the watch agent and removes its plist. Removing an
+// absent job is not an error.
+func UninstallWatch() error {
+	return uninstallLabel(WatchLabel)
 }
 
 // IsInstalled reports whether the plist file exists.
 func IsInstalled() (bool, error) {
-	plistPath, err := PlistPath()
+	return labelInstalled(Label)
+}
+
+// IsWatchInstalled reports whether the watch agent's plist file exists.
+func IsWatchInstalled() (bool, error) {
+	return labelInstalled(WatchLabel)
+}
+
+func labelInstalled(label string) (bool, error) {
+	plistPath, err := PlistPath(label)
 	if err != nil {
 		return false, err
 	}
@@ -93,12 +94,65 @@ func run(name string, args ...string) error {
 	return nil
 }
 
-// plistContent renders the launchd property list. interval is rounded to whole
-// seconds (minimum 1).
-func plistContent(binPath string, interval time.Duration, logPath string) string {
-	secs := int(interval.Seconds())
-	if secs < 1 {
-		secs = 1
+func installPlist(label, content string) error {
+	plistPath, err := PlistPath(label)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(plistPath, []byte(content), 0o644); err != nil {
+		return err
+	}
+
+	target := domainTarget()
+	// Replace any prior instance, then load and start once now.
+	_ = run("launchctl", "bootout", target+"/"+label) // ignore "not loaded"
+	if err := run("launchctl", "bootstrap", target, plistPath); err != nil {
+		return fmt.Errorf("launchctl bootstrap: %w", err)
+	}
+	if err := run("launchctl", "enable", target+"/"+label); err != nil {
+		return fmt.Errorf("launchctl enable: %w", err)
+	}
+	return nil
+}
+
+func uninstallLabel(label string) error {
+	plistPath, err := PlistPath(label)
+	if err != nil {
+		return err
+	}
+	_ = run("launchctl", "bootout", domainTarget()+"/"+label)
+	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// keepAliveThrottleSecs is the minimum gap between relaunches of a KeepAlive job.
+const keepAliveThrottleSecs = 300
+
+// renderPlist renders a launchd property list running one calmirror subcommand.
+// startIntervalSecs adds a StartInterval key when > 0; keepAlive asks launchd
+// to relaunch the job whenever it exits.
+func renderPlist(label string, args []string, startIntervalSecs int, keepAlive bool, logPath string) string {
+	var intervalKey, keepAliveKey string
+	if startIntervalSecs > 0 {
+		if startIntervalSecs < 1 {
+			startIntervalSecs = 1
+		}
+		intervalKey = fmt.Sprintf("\t<key>StartInterval</key>\n\t<integer>%d</integer>\n", startIntervalSecs)
+	}
+	if keepAlive {
+		// ThrottleInterval spaces out relaunches, so a job that keeps failing
+		// at startup cannot hammer HEY's sign-in (launchd's default is 10s).
+		keepAliveKey = fmt.Sprintf("\t<key>KeepAlive</key>\n\t<true/>\n\t<key>ThrottleInterval</key>\n\t<integer>%d</integer>\n", keepAliveThrottleSecs)
+	}
+
+	var progArgs strings.Builder
+	for _, a := range args {
+		progArgs.WriteString(fmt.Sprintf("\t\t<string>%s</string>\n", html.EscapeString(a)))
 	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -108,14 +162,10 @@ func plistContent(binPath string, interval time.Duration, logPath string) string
 	<string>%s</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>%s</string>
-		<string>sync</string>
-	</array>
+%s	</array>
 	<key>RunAtLoad</key>
 	<true/>
-	<key>StartInterval</key>
-	<integer>%d</integer>
-	<key>StandardOutPath</key>
+%s%s	<key>StandardOutPath</key>
 	<string>%s</string>
 	<key>StandardErrorPath</key>
 	<string>%s</string>
@@ -123,6 +173,6 @@ func plistContent(binPath string, interval time.Duration, logPath string) string
 	<string>Background</string>
 </dict>
 </plist>
-`, html.EscapeString(Label), html.EscapeString(binPath), secs,
+`, html.EscapeString(label), progArgs.String(), intervalKey, keepAliveKey,
 		html.EscapeString(logPath), html.EscapeString(logPath))
 }

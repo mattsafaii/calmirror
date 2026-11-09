@@ -1,7 +1,7 @@
 # CalMirror
 
-Mirror any ICS calendar feed (HEY Calendar, Basecamp, anything) into your real
-calendar as **full-fidelity native events** — preserving the conferencing/meeting
+Mirror your HEY calendars (through the [hey CLI](https://github.com/basecamp/hey-cli))
+or any ICS calendar feed (Basecamp, anything) into your real calendar as **full-fidelity native events** — preserving the conferencing/meeting
 URL, location, notes, and recurrence — refreshed on a schedule you control.
 
 Built-in ICS subscriptions in Apple and Google Calendar refresh too slowly and
@@ -45,26 +45,54 @@ go install github.com/mattsafaii/calmirror/cmd/calmirror@latest
 This drops the `calmirror` binary in `$(go env GOPATH)/bin` (usually `~/go/bin`;
 make sure it's on your `PATH`).
 
+## Sources
+
+Each feed reads from one source:
+
+- **`hey`** — HEY calendars, read through the hey CLI. Install it from
+  [basecamp/hey-cli](https://github.com/basecamp/hey-cli) and run
+  `hey auth login`; the CLI owns your HEY sign-in, so CalMirror stores no HEY
+  credential and there is no feed URL to expire. Notes, location, the meeting
+  join link, and time zones carry across. Repeating events are mirrored as
+  **individual occurrences** inside the sync window (60 days ahead by default),
+  so one-day edits and cancellations come through exactly. A calendar must be
+  switched on in HEY to be read.
+- **`ics`** (the default) — any ICS feed URL, such as Basecamp's schedule feed.
+  Recurrence passes through as RRULE.
+
 ## Usage
 
 ```sh
-# Add a feed and store the iCloud app-specific password in the Keychain.
-# Prompts for the password (or reads $CALMIRROR_ICLOUD_PASSWORD).
+# List your HEY calendars, then mirror one into Google Calendar.
+calmirror setup --source hey --kind google --feed hey --calendar "HEY (synced)"
+calmirror setup --source hey --hey-calendar 123456 --kind google \
+  --google-client-id <id> --feed hey --calendar "HEY (synced)"
+
+# Mirror an ICS feed into iCloud, storing the app-specific password in the
+# Keychain. Prompts for it (or reads $CALMIRROR_ICLOUD_PASSWORD).
 calmirror setup \
   --icloud-user you@icloud.com \
-  --feed hey \
-  --url "https://app.hey.com/calendars/…/feed" \
-  --calendar "HEY (synced)"
+  --feed basecamp \
+  --url "https://3.basecamp.com/…/schedule.ics" \
+  --calendar "Basecamp (synced)"
 
 # Run one sync pass across all configured feeds now.
 calmirror sync
 
-# Per-feed last-sync time, event counts, and last error.
+# Per-feed source, destination, last-sync time, event counts, and last error.
 calmirror status
 
-# Register / remove the launchd login-item that syncs on a schedule.
+# Register / remove the launchd login-items: scheduled syncs, plus (when the
+# hey CLI is installed) a watch agent that syncs as HEY calendars change.
 calmirror install --interval 15   # minutes
 calmirror uninstall
+
+# Optional: run in the foreground — sync whenever a HEY calendar event changes.
+# Requires the hey CLI (github.com/basecamp/hey-cli) and `hey auth login`;
+# `calmirror install` wires this up automatically when hey is present. If hey
+# fails (signed out, rate-limited), watch backs off from 1 to 30 minutes
+# between retries instead of hammering HEY's sign-in.
+calmirror watch
 ```
 
 Configuration lives at `~/Library/Application Support/calmirror/config.json`

@@ -1,5 +1,6 @@
-// Package engine is CalMirror's mirror core: for each feed it fetches the ICS
-// source, diffs it against local state by ICS UID, and creates, updates, or
+// Package engine is CalMirror's mirror core: for each feed it reads the source
+// (an ICS feed, or HEY calendars via the hey CLI), diffs it against local state
+// by event UID, and creates, updates, or
 // deletes events in the feed's dedicated destination calendar (iCloud CalDAV or
 // Google Calendar). A failure on one feed is isolated so it cannot corrupt
 // another feed's sync.
@@ -44,9 +45,12 @@ type Destination interface {
 // from a healthy iCloud feed.
 type DestinationFor func(ctx context.Context, f config.Feed) (Destination, error)
 
-// Fetcher retrieves and parses a feed. *feed.Fetcher satisfies it.
+// Fetcher reads a feed's events from its source. start and end are the feed's
+// sync window (end is zero when the future is unbounded); a source may use them
+// to bound its read, and the engine filters to the window either way. The CLI
+// routes each feed to its source kind (ICS URL or hey CLI); tests supply a fake.
 type Fetcher interface {
-	Fetch(ctx context.Context, url string) (*feed.Parsed, error)
+	Fetch(ctx context.Context, f config.Feed, start, end time.Time) (*feed.Parsed, error)
 }
 
 // Notifier surfaces a feed failure to the user. *notify.Osascript satisfies it.
@@ -136,13 +140,13 @@ func (s *Syncer) syncFeed(ctx context.Context, f config.Feed) FeedResult {
 
 	// Fetch before any destructive action: if the source 404s or errors, we
 	// return here and the existing mirror is left intact.
-	parsed, err := s.Fetcher.Fetch(ctx, f.SourceURL)
+	start, end := window(s.now(), f.SyncWindow)
+	parsed, err := s.Fetcher.Fetch(ctx, f, start, end)
 	if err != nil {
 		res.Err = err
 		return res
 	}
 
-	start, end := window(s.now(), f.SyncWindow)
 	events := filterWindow(parsed.Events, start, end)
 
 	links, err := s.Store.LinksByUID(f.Name)

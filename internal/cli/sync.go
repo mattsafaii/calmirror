@@ -11,7 +11,6 @@ import (
 
 	"github.com/mattsafaii/calmirror/internal/config"
 	"github.com/mattsafaii/calmirror/internal/engine"
-	"github.com/mattsafaii/calmirror/internal/feed"
 	"github.com/mattsafaii/calmirror/internal/notify"
 	"github.com/mattsafaii/calmirror/internal/store"
 )
@@ -41,7 +40,7 @@ func cmdSync(args []string) int {
 	syncer := &engine.Syncer{
 		Store:       st,
 		Destination: destinationFactory(cfg),
-		Fetcher:     &feed.Fetcher{},
+		Fetcher:     newSourceRouter(),
 		Notifier:    notify.Osascript{},
 	}
 	results, err := syncer.Sync(ctx, cfg.Feeds)

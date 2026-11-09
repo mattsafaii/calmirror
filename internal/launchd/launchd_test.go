@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-func TestPlistContent(t *testing.T) {
-	p := plistContent("/usr/local/bin/calmirror", 15*time.Minute, "/tmp/calmirror/sync.log")
+func TestSyncPlist(t *testing.T) {
+	p := renderPlist(Label, []string{"/usr/local/bin/calmirror", "sync"}, int((15 * time.Minute).Seconds()), false, "/tmp/calmirror/sync.log")
 
 	for _, want := range []string{
 		"<string>" + Label + "</string>",
@@ -18,14 +18,38 @@ func TestPlistContent(t *testing.T) {
 		"<string>/tmp/calmirror/sync.log</string>",
 	} {
 		if !strings.Contains(p, want) {
-			t.Errorf("plist missing %q\n---\n%s", want, p)
+			t.Errorf("sync plist missing %q\n---\n%s", want, p)
 		}
+	}
+	if strings.Contains(p, "KeepAlive") {
+		t.Errorf("sync plist should not KeepAlive:\n%s", p)
 	}
 }
 
-func TestPlistContentMinInterval(t *testing.T) {
-	p := plistContent("/bin/x", 0, "/tmp/x.log")
-	if !strings.Contains(p, "<integer>1</integer>") {
-		t.Errorf("zero interval not clamped to 1s:\n%s", p)
+func TestSyncPlistZeroIntervalOmitted(t *testing.T) {
+	p := renderPlist(Label, []string{"/bin/x", "sync"}, 0, false, "/tmp/x.log")
+	if strings.Contains(p, "StartInterval") {
+		t.Errorf("zero interval should omit StartInterval entirely:\n%s", p)
+	}
+}
+
+func TestWatchPlist(t *testing.T) {
+	p := renderPlist(WatchLabel, []string{"/usr/local/bin/calmirror", "watch"}, 0, true, "/tmp/calmirror/watch.log")
+
+	for _, want := range []string{
+		"<string>" + WatchLabel + "</string>",
+		"<string>/usr/local/bin/calmirror</string>",
+		"<string>watch</string>",
+		"<key>KeepAlive</key>\n\t<true/>",
+		"<key>ThrottleInterval</key>\n\t<integer>300</integer>",
+		"<key>RunAtLoad</key>\n\t<true/>",
+		"<string>/tmp/calmirror/watch.log</string>",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("watch plist missing %q\n---\n%s", want, p)
+		}
+	}
+	if strings.Contains(p, "StartInterval") {
+		t.Errorf("watch plist should not StartInterval (KeepAlive only):\n%s", p)
 	}
 }

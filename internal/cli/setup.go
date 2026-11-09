@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mattsafaii/calmirror/internal/caldav"
 	"github.com/mattsafaii/calmirror/internal/config"
 	"github.com/mattsafaii/calmirror/internal/google"
+	"github.com/mattsafaii/calmirror/internal/hey"
 	"github.com/mattsafaii/calmirror/internal/keychain"
 )
 
@@ -27,13 +29,15 @@ const (
 func cmdSetup(args []string) int {
 	fset := flag.NewFlagSet("setup", flag.ContinueOnError)
 	var (
-		kind       = fset.String("kind", config.KindICloud, "destination kind: icloud or google")
-		name       = fset.String("feed", "", "short feed name (stable identifier)")
-		url        = fset.String("url", "", "source ICS feed URL")
-		calendar   = fset.String("calendar", "", "destination calendar name (created if absent)")
-		pastDays   = fset.Int("past-days", config.DefaultSyncWindowPastDays, "mirror events from this many days in the past")
-		futureDays = fset.Int("future-days", 0, "mirror events up to this many days ahead (0 = unbounded)")
-		skipVerify = fset.Bool("skip-verify", false, "skip the destination connection check (iCloud only)")
+		kind        = fset.String("kind", config.KindICloud, "destination kind: icloud or google")
+		source      = fset.String("source", config.SourceICS, "source kind: ics (a feed URL) or hey (HEY calendars via the hey CLI)")
+		name        = fset.String("feed", "", "short feed name (stable identifier)")
+		url         = fset.String("url", "", "source ICS feed URL (ics source)")
+		heyCalendar = fset.String("hey-calendar", "", "HEY calendar id from `hey calendar list`, or \"all\" (hey source)")
+		calendar    = fset.String("calendar", "", "destination calendar name (created if absent)")
+		pastDays    = fset.Int("past-days", config.DefaultSyncWindowPastDays, "mirror events from this many days in the past")
+		futureDays  = fset.Int("future-days", 0, "mirror events up to this many days ahead (0 = unbounded)")
+		skipVerify  = fset.Bool("skip-verify", false, "skip the destination connection check (iCloud only)")
 
 		icloudUser     = fset.String("icloud-user", "", "iCloud Apple ID / email (icloud kind)")
 		googleClientID = fset.String("google-client-id", "", "Google OAuth desktop client id (google kind)")
@@ -42,12 +46,15 @@ func cmdSetup(args []string) int {
 		out := fset.Output()
 		fmt.Fprintf(out, "Usage:\n")
 		fmt.Fprintf(out, "  calmirror setup --kind icloud --icloud-user <email> --feed <name> --url <ics-url> --calendar <name>\n")
-		fmt.Fprintf(out, "  calmirror setup --kind google --google-client-id <id> --feed <name> --url <ics-url> --calendar <name>\n\n")
+		fmt.Fprintf(out, "  calmirror setup --kind google --google-client-id <id> --feed <name> --url <ics-url> --calendar <name>\n")
+		fmt.Fprintf(out, "  calmirror setup --source hey --hey-calendar <id|all> --kind <icloud|google> --feed <name> --calendar <name>\n\n")
 		fmt.Fprintf(out, "Adds or updates a feed routed to the chosen destination.\n")
 		fmt.Fprintf(out, "iCloud: the app-specific password is read from $%s if set, else prompted.\n", passwordEnv)
 		fmt.Fprintf(out, "Google: the client secret is read from $%s if set, else prompted; a browser\n", googleSecretEnv)
 		fmt.Fprintf(out, "        consent stores the refresh token in the Keychain. Re-run without\n")
-		fmt.Fprintf(out, "        --google-client-id to add more Google feeds on the connected account.\n\n")
+		fmt.Fprintf(out, "        --google-client-id to add more Google feeds on the connected account.\n")
+		fmt.Fprintf(out, "HEY:    the hey CLI must be installed and signed in (`hey auth login`). Repeating\n")
+		fmt.Fprintf(out, "        events are mirrored as individual occurrences, %d days ahead by default.\n\n", config.DefaultHEYFutureDays)
 		fset.PrintDefaults()
 	}
 	if err := fset.Parse(args); err != nil {
@@ -60,9 +67,21 @@ func cmdSetup(args []string) int {
 		return fail("--kind must be %q or %q", config.KindICloud, config.KindGoogle)
 	}
 
+	*source = strings.ToLower(strings.TrimSpace(*source))
+	if *source != config.SourceICS && *source != config.SourceHEY {
+		fset.Usage()
+		return fail("--source must be %q or %q", config.SourceICS, config.SourceHEY)
+	}
+
 	// Fields required regardless of destination kind.
+	required := map[string]string{"feed": *name, "calendar": *calendar}
+	if *source == config.SourceICS {
+		required["url"] = *url
+	} else if strings.TrimSpace(*url) != "" {
+		return fail("--url does not apply to --source hey; the hey CLI reads the calendars")
+	}
 	missing := []string{}
-	for flagName, val := range map[string]string{"feed": *name, "url": *url, "calendar": *calendar} {
+	for flagName, val := range required {
 		if strings.TrimSpace(val) == "" {
 			missing = append(missing, "--"+flagName)
 		}
@@ -70,6 +89,15 @@ func cmdSetup(args []string) int {
 	if len(missing) > 0 {
 		fset.Usage()
 		return fail("missing required flags: %s", strings.Join(missing, ", "))
+	}
+
+	var heyCalendarID int64
+	if *source == config.SourceHEY {
+		id, rc := resolveHEYCalendar(*heyCalendar)
+		if rc != 0 {
+			return rc
+		}
+		heyCalendarID = id
 	}
 
 	// Load existing config or start fresh.
@@ -96,7 +124,9 @@ func cmdSetup(args []string) int {
 	feedCfg := config.Feed{
 		Name:                *name,
 		Kind:                *kind,
+		Source:              *source,
 		SourceURL:           *url,
+		HEYCalendarID:       heyCalendarID,
 		DestinationCalendar: *calendar,
 		SyncWindow:          config.SyncWindow{PastDays: *pastDays, FutureDays: *futureDays},
 	}
@@ -106,7 +136,7 @@ func cmdSetup(args []string) int {
 		return fail("save config: %v", err)
 	}
 	path, _ := config.Path()
-	fmt.Printf("Saved feed %q (%s) -> calendar %q (config: %s)\n", *name, *kind, *calendar, path)
+	fmt.Printf("Saved feed %q (%s -> %s) -> calendar %q (config: %s)\n", *name, *source, *kind, *calendar, path)
 	return 0
 }
 
@@ -216,4 +246,50 @@ func verifyICloud(user, password string) error {
 	defer cancel()
 	_, err = client.Discover(ctx)
 	return err
+}
+
+// resolveHEYCalendar turns --hey-calendar into a calendar id (0 = every
+// calendar switched on in HEY). With no value it lists the account's calendars
+// so the user can pick one. A listing that fails (not signed in, rate-limited)
+// is only a warning when an explicit id was given, so setup still works offline.
+func resolveHEYCalendar(value string) (int64, int) {
+	value = strings.TrimSpace(value)
+	if _, err := hey.Find(); err != nil {
+		return 0, fail("%v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cals, listErr := (&hey.Client{}).Calendars(ctx)
+
+	if value == "" {
+		if listErr != nil {
+			return 0, fail("list HEY calendars: %v", listErr)
+		}
+		fmt.Fprintln(os.Stderr, "Pick a HEY calendar with --hey-calendar <id>, or --hey-calendar all:")
+		for _, c := range cals {
+			fmt.Fprintf(os.Stderr, "  %-10d %s (%s)\n", c.ID, c.Name, c.Kind)
+		}
+		return 0, 2
+	}
+	if strings.EqualFold(value, "all") {
+		fmt.Println("Mirroring every calendar switched on in HEY.")
+		return 0, 0
+	}
+
+	id, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fail("--hey-calendar must be a calendar id from `hey calendar list`, or \"all\"")
+	}
+	if listErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not check HEY calendar %d: %v\n", id, listErr)
+		return id, 0
+	}
+	for _, c := range cals {
+		if c.ID == id {
+			fmt.Printf("Mirroring HEY calendar %q. It must stay switched on in HEY to be read.\n", c.Name)
+			return id, 0
+		}
+	}
+	return 0, fail("no HEY calendar with id %d; run `calmirror setup --source hey` without --hey-calendar to list them", id)
 }
