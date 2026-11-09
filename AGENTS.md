@@ -67,6 +67,7 @@ Phase 1 shipped a headless engine (fetch → diff by UID → create/update/delet
 ## Known edges / watch out
 
 - **HEY sign-in is rate-limited.** Never retry a refused `hey` sign-in in a loop — the old CalMirror watch agent restarted ~172k times and locked Matt's HEY account out. Back off, and stop on auth failures.
+- **hey CLI, not `hey mcp`** (decided 2026-11-09). `hey mcp` (hey-cli ≥ 1.x) only exposes list calendars / calendar recordings / toggle for calendars; HEY's Calendar Periods (the week view that expands repeats per day) isn't in any MCP domain, and it needs a separate `hey auth login --mcp`. Don't add an MCP backend unless that changes.
 - **HEY's Week view only covers calendars switched on in HEY.** Switching one off empties its mirror.
 - **Conferencing fidelity on Google** — third-party meeting URLs (HEY/Zoom) can't be set as native Google `conferenceData` the way Meet links can, so the URL goes in location + a description line.
 - **Recurring events** — HEY feeds expand occurrences (exact, window-bounded). ICS feeds pass RRULE through; treat exotic recurrence as a known edge.

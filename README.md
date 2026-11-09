@@ -28,6 +28,11 @@ disappear, on a schedule and within moments of a change in HEY.
 5. The meeting link goes in the event's location and a "Join:" line in its
    description, where Granola and Zoom look for it.
 
+Heyday reads HEY only through the hey CLI (`hey event week`, `hey calendar
+list`, `hey watch`). It doesn't use `hey mcp`: that server's calendar tools
+return a repeating event once, as its series, rather than each day, and it
+needs its own separate sign-in. ICS feeds are an optional extra (below).
+
 If a read from HEY fails, that sync changes nothing, so a hiccup can never
 delete your mirrored events. Persistent problems (signed out of HEY, a revoked
 Google token) show up as a notification and in `heyday status`.

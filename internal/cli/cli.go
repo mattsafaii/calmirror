@@ -14,7 +14,7 @@ Usage:
   heyday <command> [arguments]
 
 Commands:
-  setup       Connect Google and add a feed (a HEY calendar, or an ICS feed URL)
+  setup       Connect Google and pick the HEY calendar to mirror (an ICS feed is optional)
   sync        Run one sync pass across all configured feeds
   status      Show each feed's source, Google calendar, last sync, event count and last error
   watch       Sync whenever HEY calendars change (requires the hey CLI)
